@@ -22,4 +22,10 @@ pub mod rules;
 pub mod temporal;
 pub mod topographic;
 
+pub mod antialias;
+pub mod curved_label;
+pub mod mvt;
+pub mod symbols;
+pub mod text;
+
 pub use renderer::Renderer;

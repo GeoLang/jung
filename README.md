@@ -9,10 +9,14 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 ### Core Rendering
 - **Line Rendering** — variable width, dash patterns, line caps (butt/round/square), line joins (miter/round/bevel), offset
 - **Polygon Rendering** — fill, stroke, opacity, scanline rasterization
+- **Anti-Aliased Rendering** — Xiaolin Wu line AA, distance-based thick line AA, subpixel polygon coverage, smooth circle edges
 - **Data-Driven Styling** — property-based expressions for dynamic colors, widths, sizes
 - **Zoom-Dependent Styling** — interpolated stops for smooth transitions across zoom levels
 - **Icon/Marker Rendering** — sprite atlases, built-in shapes (circle, square, diamond, star, triangle), alpha-composited blitting
+- **Symbol Library** — 16+ built-in vector symbols (pin, flag, airport, hospital, fuel, parking, tree, mountain, shields, hazards) rendered at any resolution
 - **Label Engine** — bitmap text, word wrap, collision detection/decluttering, anchor positioning, halo/buffer rendering
+- **TrueType Font Rendering** — TTF/OTF parsing via ttf-parser, glyph rasterization at arbitrary sizes, kerning, subpixel anti-aliasing
+- **Curved Labels** — text placed along line geometries, per-character rotation, max angle rejection, halo outlines, repeat spacing
 
 ### Advanced Symbology
 - **Graduated/Classified** — equal interval, quantile, natural breaks (Fisher-Jenks), standard deviation, manual classification with color ramps
@@ -33,6 +37,10 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 - **SVG Vector Export** — circles, paths, polygons, text, groups with transforms, proper XML escaping
 - **High-DPI Print** — configurable DPI (72/300/600+), paper sizes (A4 etc.), margins, scale bars, north arrows
 - **WebAssembly** — full engine in the browser via wasm-bindgen
+
+### Input Formats
+- **GeoJSON** — standard feature collections
+- **Mapbox Vector Tiles (MVT/PBF)** — zero-dependency protobuf decoder, geometry command parsing, zigzag coordinate decoding, attribute extraction
 
 ### Expression Engine
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
@@ -71,8 +79,13 @@ jung-core/
 ├── geometry.rs       — Point, Geometry, Feature types
 ├── line.rs           — Line rendering with caps, joins, dash patterns
 ├── polygon.rs        — Polygon fill and stroke
+├── antialias.rs      — Anti-aliased lines, circles, polygons (Wu/distance)
 ├── marker.rs         — Icon/sprite rendering and blitting
+├── symbols.rs        — Built-in vector symbol library (16+ icons)
 ├── label.rs          — Text placement with collision detection
+├── text.rs           — TrueType/OTF font rasterization
+├── curved_label.rs   — Text along line geometries
+├── mvt.rs            — Mapbox Vector Tile protobuf decoder
 ├── classification.rs — Data classification and color ramps
 ├── clustering.rs     — Point clustering (grid, hierarchical, DBSCAN)
 ├── heatmap.rs        — Kernel density heatmap
@@ -351,4 +364,4 @@ Jung provides the symbology engine that TileTopia uses for raster tile rendering
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+GNU Affero General Public License v3.0 or later. See [LICENSE](LICENSE) for details.

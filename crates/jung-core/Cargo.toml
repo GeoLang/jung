@@ -10,5 +10,6 @@ authors.workspace = true
 [dependencies]
 jung-style = { workspace = true }
 thiserror = { workspace = true }
+ttf-parser = { workspace = true }
 
 [dev-dependencies]

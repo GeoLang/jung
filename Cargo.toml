@@ -5,9 +5,9 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/TileTopia-HQ/jung"
-authors = ["Aaron Boxer <boxerab@protonmail.com>"]
+authors = ["TileTopia <tiletopia@proton.me>"]
 
 [workspace.dependencies]
 jung-core = { path = "crates/jung-core" }
@@ -15,3 +15,4 @@ jung-style = { path = "crates/jung-style" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+ttf-parser = "0.25"
