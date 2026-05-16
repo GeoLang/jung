@@ -177,8 +177,10 @@
         <div class="badges">
             <span class="badge">Rust</span>
             <span class="badge">WebAssembly</span>
+            <span class="badge">GPU (Vello/wgpu)</span>
             <span class="badge">Mapbox GL Compatible</span>
-            <span class="badge">MIT / Apache-2.0</span>
+            <span class="badge">OGC Standards</span>
+            <span class="badge">AGPL-3.0-or-later</span>
         </div>
     </div>
 
@@ -187,24 +189,36 @@
             <h2>Features</h2>
             <div class="features">
                 <div class="feature-card">
+                    <h3>GPU Accelerated</h3>
+                    <p>Hardware-accelerated rendering via Vello/wgpu. Build scene graphs and render at native speed on any GPU.</p>
+                </div>
+                <div class="feature-card">
                     <h3>Mapbox GL Compatible</h3>
-                    <p>Parse and render using the industry-standard Mapbox GL JSON style specification. Drop-in replacement for your existing styles.</p>
+                    <p>Full expression language: data-driven styling, zoom interpolation, property-based filters. Drop-in style compatibility.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>WebAssembly Ready</h3>
-                    <p>Run the full rendering engine in the browser. Style and render features client-side with native performance.</p>
+                    <h3>OGC Standards</h3>
+                    <p>WKT/WKB serialization, Filter Encoding, Simple Features operations (envelope, area, length, centroid).</p>
                 </div>
                 <div class="feature-card">
-                    <h3>High Performance</h3>
-                    <p>Pure Rust with zero-copy geometry processing. Designed for rendering millions of features into tiles at scale.</p>
+                    <h3>Anti-Aliased Rendering</h3>
+                    <p>Xiaolin Wu line AA, distance-based thick lines, subpixel polygon coverage, smooth circle edges.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Extensible Symbology</h3>
-                    <p>Beyond basic fill/stroke: graduated symbols, proportional sizing, label placement, and military symbology (MIL-STD-2525).</p>
+                    <h3>Advanced Symbology</h3>
+                    <p>MIL-STD-2525 military, S-52/S-57 maritime, topographic contours/hillshade, graduated/classified, heatmaps, clustering.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Label Engine</h3>
+                    <p>TrueType font rendering, collision detection, curved text along lines, halo outlines, word wrap, anchor positioning.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Vector Tiles (MVT)</h3>
+                    <p>Zero-dependency protobuf decoder for Mapbox Vector Tiles. Geometry command parsing, zigzag decoding, attribute extraction.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Multiple Outputs</h3>
-                    <p>Render to raw RGBA pixels for tile generation, SVG for print/export, or vector draw commands for custom backends.</p>
+                    <p>RGBA pixels, SVG vector export, high-DPI print (300/600 DPI), GPU scene graph, and WebAssembly for the browser.</p>
                 </div>
                 <div class="feature-card">
                     <h3>TileTopia Ecosystem</h3>
@@ -238,11 +252,12 @@ let pixels = renderer.render(&style, &features, &bbox).unwrap();</code></pre>
 │  (parsing)  │     │ (rendering) │     │   (CLI)     │
 └─────────────┘     └─────────────┘     └─────────────┘
                            │
-                           ▼
-                    ┌─────────────┐
-                    │  jung-wasm  │
-                    │  (browser)  │
-                    └─────────────┘</code></pre>
+                      ┌────┴────┐
+                      ▼         ▼
+               ┌───────────┐ ┌───────────┐
+               │ jung-wasm │ │jung-vello │
+               │ (browser) │ │  (GPU)    │
+               └───────────┘ └───────────┘</code></pre>
             </div>
         </section>
 
@@ -254,7 +269,7 @@ let pixels = renderer.render(&style, &features, &bbox).unwrap();</code></pre>
 
     <footer>
         <p>Part of the <a href="https://github.com/TileTopia-HQ">TileTopia</a> geospatial platform.
-        Licensed under MIT or Apache-2.0.</p>
+        Licensed under <a href="https://github.com/TileTopia-HQ/jung/blob/master/LICENSE">AGPL-3.0-or-later</a>.</p>
     </footer>
 </body>
 </html>
