@@ -37,19 +37,46 @@ pub struct Style {
     pub layers: Vec<Layer>,
 }
 
+/// Line cap style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineCap {
+    #[default]
+    Butt,
+    Round,
+    Square,
+}
+
+use crate::expr::StyleValue;
+
+/// Line join style.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineJoin {
+    #[default]
+    Miter,
+    Round,
+    Bevel,
+}
+
 /// A single symbology layer.
 #[derive(Debug, Clone)]
 pub struct Layer {
     pub id: String,
     pub source: Option<String>,
-    pub fill_color: Option<Color>,
-    pub stroke_color: Option<Color>,
-    pub stroke_width: Option<f32>,
-    pub point_radius: Option<f32>,
+    pub fill_color: Option<StyleValue<Color>>,
+    pub stroke_color: Option<StyleValue<Color>>,
+    pub stroke_width: Option<StyleValue<f32>>,
+    pub line_cap: LineCap,
+    pub line_join: LineJoin,
+    pub line_dasharray: Option<Vec<f32>>,
+    pub line_offset: Option<StyleValue<f32>>,
+    pub line_opacity: Option<StyleValue<f32>>,
+    pub point_radius: Option<StyleValue<f32>>,
+    pub icon_image: Option<StyleValue<String>>,
+    pub icon_size: Option<StyleValue<f32>>,
     pub font_family: Option<String>,
-    pub font_size: Option<f32>,
-    pub text_field: Option<String>,
-    pub text_color: Option<Color>,
+    pub font_size: Option<StyleValue<f32>>,
+    pub text_field: Option<StyleValue<String>>,
+    pub text_color: Option<StyleValue<Color>>,
 }
 
 /// Intermediate JSON representation for deserialization.
@@ -72,27 +99,41 @@ struct LayerJson {
 #[derive(Deserialize, Default)]
 struct PaintJson {
     #[serde(rename = "fill-color")]
-    fill_color: Option<String>,
+    fill_color: Option<serde_json::Value>,
     #[serde(rename = "line-color")]
-    line_color: Option<String>,
+    line_color: Option<serde_json::Value>,
     #[serde(rename = "line-width")]
-    line_width: Option<f32>,
+    line_width: Option<serde_json::Value>,
+    #[serde(rename = "line-dasharray")]
+    line_dasharray: Option<Vec<f32>>,
+    #[serde(rename = "line-offset")]
+    line_offset: Option<serde_json::Value>,
+    #[serde(rename = "line-opacity")]
+    line_opacity: Option<serde_json::Value>,
     #[serde(rename = "circle-radius")]
-    circle_radius: Option<f32>,
+    circle_radius: Option<serde_json::Value>,
     #[serde(rename = "circle-color")]
-    circle_color: Option<String>,
+    circle_color: Option<serde_json::Value>,
     #[serde(rename = "text-color")]
-    text_color: Option<String>,
+    text_color: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Default)]
 struct LayoutJson {
     #[serde(rename = "text-field")]
-    text_field: Option<String>,
+    text_field: Option<serde_json::Value>,
     #[serde(rename = "text-font")]
     text_font: Option<Vec<String>>,
     #[serde(rename = "text-size")]
-    text_size: Option<f32>,
+    text_size: Option<serde_json::Value>,
+    #[serde(rename = "line-cap")]
+    line_cap: Option<String>,
+    #[serde(rename = "line-join")]
+    line_join: Option<String>,
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde_json::Value>,
+    #[serde(rename = "icon-size")]
+    icon_size: Option<serde_json::Value>,
 }
 
 /// Parse a JSON style string into a `Style`.
@@ -105,19 +146,32 @@ pub fn parse_style(json: &str) -> Result<Style, StyleError> {
         .map(|l| Layer {
             id: l.id,
             source: l.source,
-            fill_color: l
-                .paint
-                .fill_color
+            fill_color: parse_color_value(&l.paint.fill_color)
+                .or_else(|| parse_color_value(&l.paint.circle_color)),
+            stroke_color: parse_color_value(&l.paint.line_color),
+            stroke_width: parse_number_value(&l.paint.line_width),
+            line_cap: l
+                .layout
+                .line_cap
                 .as_deref()
-                .and_then(parse_css_color)
-                .or_else(|| l.paint.circle_color.as_deref().and_then(parse_css_color)),
-            stroke_color: l.paint.line_color.as_deref().and_then(parse_css_color),
-            stroke_width: l.paint.line_width,
-            point_radius: l.paint.circle_radius,
+                .map(parse_line_cap)
+                .unwrap_or_default(),
+            line_join: l
+                .layout
+                .line_join
+                .as_deref()
+                .map(parse_line_join)
+                .unwrap_or_default(),
+            line_dasharray: l.paint.line_dasharray,
+            line_offset: parse_number_value(&l.paint.line_offset),
+            line_opacity: parse_number_value(&l.paint.line_opacity),
+            point_radius: parse_number_value(&l.paint.circle_radius),
+            icon_image: parse_string_value(&l.layout.icon_image),
+            icon_size: parse_number_value(&l.layout.icon_size),
             font_family: l.layout.text_font.as_ref().and_then(|f| f.first().cloned()),
-            font_size: l.layout.text_size,
-            text_field: l.layout.text_field,
-            text_color: l.paint.text_color.as_deref().and_then(parse_css_color),
+            font_size: parse_number_value(&l.layout.text_size),
+            text_field: parse_string_value(&l.layout.text_field),
+            text_color: parse_color_value(&l.paint.text_color),
         })
         .collect();
 
@@ -125,6 +179,58 @@ pub fn parse_style(json: &str) -> Result<Style, StyleError> {
         name: raw.name.unwrap_or_else(|| "untitled".to_string()),
         layers,
     })
+}
+
+/// Parse a JSON value into a StyleValue<Color> — either a literal color string or an expression.
+fn parse_color_value(value: &Option<serde_json::Value>) -> Option<StyleValue<Color>> {
+    let val = value.as_ref()?;
+    match val {
+        serde_json::Value::String(s) => parse_css_color(s).map(StyleValue::Literal),
+        serde_json::Value::Array(_) => {
+            crate::expr::parse_expression(val).map(StyleValue::Expression)
+        }
+        _ => None,
+    }
+}
+
+/// Parse a JSON value into a StyleValue<f32> — either a literal number or an expression.
+fn parse_number_value(value: &Option<serde_json::Value>) -> Option<StyleValue<f32>> {
+    let val = value.as_ref()?;
+    match val {
+        serde_json::Value::Number(n) => n.as_f64().map(|v| StyleValue::Literal(v as f32)),
+        serde_json::Value::Array(_) => {
+            crate::expr::parse_expression(val).map(StyleValue::Expression)
+        }
+        _ => None,
+    }
+}
+
+/// Parse a JSON value into a StyleValue<String> — either a literal string or an expression.
+fn parse_string_value(value: &Option<serde_json::Value>) -> Option<StyleValue<String>> {
+    let val = value.as_ref()?;
+    match val {
+        serde_json::Value::String(s) => Some(StyleValue::Literal(s.clone())),
+        serde_json::Value::Array(_) => {
+            crate::expr::parse_expression(val).map(StyleValue::Expression)
+        }
+        _ => None,
+    }
+}
+
+fn parse_line_cap(s: &str) -> LineCap {
+    match s {
+        "round" => LineCap::Round,
+        "square" => LineCap::Square,
+        _ => LineCap::Butt,
+    }
+}
+
+fn parse_line_join(s: &str) -> LineJoin {
+    match s {
+        "round" => LineJoin::Round,
+        "bevel" => LineJoin::Bevel,
+        _ => LineJoin::Miter,
+    }
 }
 
 /// Parse a CSS color string (#rgb, #rrggbb, #rrggbbaa, or named colors).
@@ -199,9 +305,15 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
     }
 }
 
+/// Public accessor for CSS color parsing (used by the expression module).
+pub fn parse_css_color_pub(s: &str) -> Option<Color> {
+    parse_css_color(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::expr::StyleValue;
 
     #[test]
     fn parse_hex_colors() {
@@ -254,8 +366,11 @@ mod tests {
         assert_eq!(style.name, "test-style");
         assert_eq!(style.layers.len(), 1);
         assert_eq!(style.layers[0].id, "points");
-        assert_eq!(style.layers[0].fill_color, Some(Color::rgb(255, 0, 0)));
-        assert_eq!(style.layers[0].point_radius, Some(5.0));
+        assert_eq!(
+            style.layers[0].fill_color,
+            Some(StyleValue::Literal(Color::rgb(255, 0, 0)))
+        );
+        assert_eq!(style.layers[0].point_radius, Some(StyleValue::Literal(5.0)));
     }
 
     #[test]
@@ -280,10 +395,16 @@ mod tests {
         let style = parse_style(json).unwrap();
         assert_eq!(style.name, "untitled");
         assert_eq!(style.layers.len(), 3);
-        assert_eq!(style.layers[1].stroke_color, Some(Color::rgb(0, 255, 0)));
-        assert_eq!(style.layers[1].stroke_width, Some(2.0));
-        assert_eq!(style.layers[2].text_field, Some("{name}".to_string()));
-        assert_eq!(style.layers[2].font_size, Some(14.0));
+        assert_eq!(
+            style.layers[1].stroke_color,
+            Some(StyleValue::Literal(Color::rgb(0, 255, 0)))
+        );
+        assert_eq!(style.layers[1].stroke_width, Some(StyleValue::Literal(2.0)));
+        assert_eq!(
+            style.layers[2].text_field,
+            Some(StyleValue::Literal("{name}".to_string()))
+        );
+        assert_eq!(style.layers[2].font_size, Some(StyleValue::Literal(14.0)));
     }
 
     #[test]

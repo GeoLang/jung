@@ -26,21 +26,13 @@ pub struct PolygonGeom {
     pub holes: Vec<Vec<Point>>,
 }
 
+use jung_style::PropertyValue;
+
 /// A geospatial feature with geometry and attributes.
 #[derive(Debug, Clone)]
 pub struct Feature {
     pub geometry: Geometry,
     pub properties: std::collections::HashMap<String, PropertyValue>,
-}
-
-/// Attribute values on a feature.
-#[derive(Debug, Clone, PartialEq)]
-pub enum PropertyValue {
-    String(String),
-    Number(f64),
-    Integer(i64),
-    Boolean(bool),
-    Null,
 }
 
 #[cfg(test)]
