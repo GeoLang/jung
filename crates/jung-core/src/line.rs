@@ -523,3 +523,110 @@ fn offset_polyline(points: &[(f64, f64)], offset: f64) -> Vec<(f64, f64)> {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_bbox() -> BBox {
+        BBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+        }
+    }
+
+    #[test]
+    fn render_basic_line() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let points = vec![Point { x: 0.1, y: 0.5 }, Point { x: 0.9, y: 0.5 }];
+        let params = LineParams {
+            color: Color::rgb(255, 0, 0),
+            width: 2.0,
+            ..Default::default()
+        };
+        render_line(&mut buffer, &points, &test_bbox(), 100, 100, &params);
+        let filled = buffer.data.chunks(4).filter(|px| px[0] > 0).count();
+        assert!(filled > 50);
+    }
+
+    #[test]
+    fn render_line_too_short() {
+        let mut buffer = PixelBuffer::new(50, 50);
+        let points = vec![Point { x: 0.5, y: 0.5 }];
+        let params = LineParams::default();
+        render_line(&mut buffer, &points, &test_bbox(), 50, 50, &params);
+        // No crash, no pixels drawn for single point
+        let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+        assert_eq!(filled, 0);
+    }
+
+    #[test]
+    fn render_dashed_line() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let points = vec![Point { x: 0.1, y: 0.5 }, Point { x: 0.9, y: 0.5 }];
+        let params = LineParams {
+            color: Color::rgb(0, 0, 255),
+            width: 2.0,
+            dasharray: Some(vec![5.0, 5.0]),
+            ..Default::default()
+        };
+        render_line(&mut buffer, &points, &test_bbox(), 100, 100, &params);
+        let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+        assert!(filled > 20);
+    }
+
+    #[test]
+    fn render_line_with_offset() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let points = vec![Point { x: 0.1, y: 0.5 }, Point { x: 0.9, y: 0.5 }];
+        let params = LineParams {
+            color: Color::rgb(0, 255, 0),
+            width: 1.0,
+            offset: 5.0,
+            ..Default::default()
+        };
+        render_line(&mut buffer, &points, &test_bbox(), 100, 100, &params);
+        let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+        assert!(filled > 20);
+    }
+
+    #[test]
+    fn render_line_with_opacity() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let points = vec![Point { x: 0.1, y: 0.5 }, Point { x: 0.9, y: 0.5 }];
+        let params = LineParams {
+            color: Color::rgb(255, 0, 0),
+            width: 3.0,
+            opacity: 0.5,
+            ..Default::default()
+        };
+        render_line(&mut buffer, &points, &test_bbox(), 100, 100, &params);
+        // Pixels should be semi-transparent (alpha ~128 not 255)
+        let semi = buffer
+            .data
+            .chunks(4)
+            .filter(|px| px[3] > 50 && px[3] < 200)
+            .count();
+        assert!(semi > 0);
+    }
+
+    #[test]
+    fn render_polyline() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let points = vec![
+            Point { x: 0.1, y: 0.1 },
+            Point { x: 0.5, y: 0.9 },
+            Point { x: 0.9, y: 0.1 },
+        ];
+        let params = LineParams {
+            color: Color::rgb(255, 255, 0),
+            width: 2.0,
+            ..Default::default()
+        };
+        render_line(&mut buffer, &points, &test_bbox(), 100, 100, &params);
+        let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+        assert!(filled > 80);
+    }
+}

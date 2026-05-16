@@ -196,3 +196,193 @@ fn blend_pixel(buffer: &mut PixelBuffer, x: u32, y: u32, color: Color) {
         buffer.data[idx + 3] = (out_a * 255.0) as u8;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jung_style::{LineCap, LineJoin, StyleValue};
+    use std::collections::HashMap;
+
+    fn test_bbox() -> BBox {
+        BBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+        }
+    }
+
+    fn make_layer(fill: Color) -> Layer {
+        Layer {
+            id: "test".to_string(),
+            source: None,
+            fill_color: Some(StyleValue::Literal(fill)),
+            stroke_color: None,
+            stroke_width: None,
+            line_cap: LineCap::Butt,
+            line_join: LineJoin::Miter,
+            line_dasharray: None,
+            line_offset: None,
+            line_opacity: None,
+            point_radius: None,
+            icon_image: None,
+            icon_size: None,
+            font_family: None,
+            font_size: None,
+            text_field: None,
+            text_color: None,
+        }
+    }
+
+    fn make_ctx() -> EvalContext<'static> {
+        static EMPTY: std::sync::LazyLock<HashMap<String, jung_style::PropertyValue>> =
+            std::sync::LazyLock::new(HashMap::new);
+        EvalContext {
+            properties: &EMPTY,
+            zoom: 10.0,
+            geometry_type: "Polygon",
+        }
+    }
+
+    #[test]
+    fn fill_simple_square() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let exterior = vec![
+            Point { x: 0.2, y: 0.2 },
+            Point { x: 0.8, y: 0.2 },
+            Point { x: 0.8, y: 0.8 },
+            Point { x: 0.2, y: 0.8 },
+            Point { x: 0.2, y: 0.2 },
+        ];
+        let layer = make_layer(Color::rgb(255, 0, 0));
+        let ctx = make_ctx();
+        render_polygon(
+            &mut buffer,
+            &exterior,
+            &[],
+            &test_bbox(),
+            100,
+            100,
+            &layer,
+            &ctx,
+        );
+        let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+        // ~60x60 = 3600 pixels
+        assert!(filled > 3000);
+    }
+
+    #[test]
+    fn polygon_with_hole() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let exterior = vec![
+            Point { x: 0.1, y: 0.1 },
+            Point { x: 0.9, y: 0.1 },
+            Point { x: 0.9, y: 0.9 },
+            Point { x: 0.1, y: 0.9 },
+            Point { x: 0.1, y: 0.1 },
+        ];
+        let hole = vec![
+            Point { x: 0.4, y: 0.4 },
+            Point { x: 0.6, y: 0.4 },
+            Point { x: 0.6, y: 0.6 },
+            Point { x: 0.4, y: 0.6 },
+            Point { x: 0.4, y: 0.4 },
+        ];
+        let layer = make_layer(Color::rgb(0, 0, 255));
+        let ctx = make_ctx();
+        render_polygon(
+            &mut buffer,
+            &exterior,
+            &[hole],
+            &test_bbox(),
+            100,
+            100,
+            &layer,
+            &ctx,
+        );
+        // Center should be empty (hole)
+        let center_idx = (50 * 100 + 50) * 4;
+        assert_eq!(buffer.data[center_idx + 3], 0);
+        // Outer area should be filled
+        let corner_idx = (20 * 100 + 20) * 4;
+        assert!(buffer.data[corner_idx + 3] > 0);
+    }
+
+    #[test]
+    fn degenerate_polygon_no_crash() {
+        let mut buffer = PixelBuffer::new(50, 50);
+        let exterior = vec![Point { x: 0.5, y: 0.5 }, Point { x: 0.6, y: 0.6 }];
+        let layer = make_layer(Color::rgb(0, 255, 0));
+        let ctx = make_ctx();
+        render_polygon(
+            &mut buffer,
+            &exterior,
+            &[],
+            &test_bbox(),
+            50,
+            50,
+            &layer,
+            &ctx,
+        );
+        // No crash, no fill for <3 vertices
+    }
+
+    #[test]
+    fn polygon_with_stroke() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let exterior = vec![
+            Point { x: 0.2, y: 0.2 },
+            Point { x: 0.8, y: 0.2 },
+            Point { x: 0.8, y: 0.8 },
+            Point { x: 0.2, y: 0.8 },
+            Point { x: 0.2, y: 0.2 },
+        ];
+        let mut layer = make_layer(Color::rgba(0, 0, 0, 0)); // No fill
+        layer.stroke_color = Some(StyleValue::Literal(Color::rgb(255, 0, 0)));
+        layer.stroke_width = Some(StyleValue::Literal(2.0));
+        let ctx = make_ctx();
+        render_polygon(
+            &mut buffer,
+            &exterior,
+            &[],
+            &test_bbox(),
+            100,
+            100,
+            &layer,
+            &ctx,
+        );
+        let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+        assert!(filled > 100); // stroke pixels
+    }
+
+    #[test]
+    fn polygon_semi_transparent() {
+        let mut buffer = PixelBuffer::new(100, 100);
+        let exterior = vec![
+            Point { x: 0.2, y: 0.2 },
+            Point { x: 0.8, y: 0.2 },
+            Point { x: 0.8, y: 0.8 },
+            Point { x: 0.2, y: 0.8 },
+            Point { x: 0.2, y: 0.2 },
+        ];
+        let layer = make_layer(Color::rgba(255, 0, 0, 128));
+        let ctx = make_ctx();
+        render_polygon(
+            &mut buffer,
+            &exterior,
+            &[],
+            &test_bbox(),
+            100,
+            100,
+            &layer,
+            &ctx,
+        );
+        // Should have semi-transparent pixels
+        let semi = buffer
+            .data
+            .chunks(4)
+            .filter(|px| px[3] > 50 && px[3] < 200)
+            .count();
+        assert!(semi > 1000);
+    }
+}
