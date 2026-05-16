@@ -27,9 +27,12 @@ pub mod topographic;
 
 pub mod antialias;
 pub mod curved_label;
+pub mod label_priority;
 pub mod mvt;
 pub mod ogc;
+pub mod sld;
 pub mod symbols;
 pub mod text;
+pub mod tiling;
 
 pub use renderer::Renderer;
