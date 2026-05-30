@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 jung-style = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
 
