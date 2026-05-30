@@ -51,7 +51,7 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar czf ../../../jung-${{ matrix.target }}.tar.gz jung
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jung-${{ matrix.target }}
           path: jung-${{ matrix.target }}.tar.gz
