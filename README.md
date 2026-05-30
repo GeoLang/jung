@@ -370,15 +370,15 @@ cd crates/jung-wasm
 wasm-pack build --target web
 ```
 
-## Integration with TileTopia Ecosystem
+## Integration with GeoLang Ecosystem
 
-Jung is part of the TileTopia geospatial platform:
+Jung is part of the GeoLang geospatial platform:
 
-- **[TileTopia](https://github.com/TileTopia-HQ/tiletopia)** — 3D tile generation pipeline
-- **[ViewTopia](https://github.com/TileTopia-HQ/viewtopia)** — Geospatial viewer with agentic AI
-- **[Ptolemy](https://github.com/TileTopia-HQ/ptolemy)** — Versioned geospatial database
+- **[GeoLang](https://github.com/GeoLang/tiletopia)** — 3D tile generation pipeline
+- **[ViewTopia](https://github.com/GeoLang/viewtopia)** — Geospatial viewer with agentic AI
+- **[Ptolemy](https://github.com/GeoLang/ptolemy)** — Versioned geospatial database
 
-Jung provides the symbology engine that TileTopia uses for raster tile rendering and ViewTopia uses (via WASM) for client-side styling.
+Jung provides the symbology engine that GeoLang uses for raster tile rendering and ViewTopia uses (via WASM) for client-side styling.
 
 ## License
 
