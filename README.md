@@ -1,5 +1,8 @@
 # Jung
 
+[![CI](https://github.com/GeoLang/jung/actions/workflows/ci.yml/badge.svg)](https://github.com/GeoLang/jung/actions)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+
 A high-performance geospatial symbology and cartographic rendering engine written in Rust.
 
 Jung transforms geospatial features + style definitions into rendered output (raster pixels, SVG vector graphics, or high-DPI print output). Named after Carl Jung and his work on archetypal symbols.
