@@ -25,7 +25,7 @@ pub enum ClassificationMethod {
 #[derive(Debug, Clone)]
 pub struct ClassBreaks {
     /// Sorted ascending break values. N breaks define N+1 classes.
-    /// Class i contains values where breaks[i-1] <= v < breaks[i].
+    /// Class i contains values where `breaks[i-1] <= v < breaks[i]`.
     pub breaks: Vec<f64>,
     pub method: ClassificationMethod,
 }
