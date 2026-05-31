@@ -58,6 +58,7 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
 - **Custom Functions** — user-defined function registry with built-ins: `clamp`, `lerp`, `pow`, `sqrt`, `log`, `log10`, `len`, `contains`, `if_null`
 - **StyleValue&lt;T&gt;** — expressions or literals for any style property, enabling fully data-driven maps
+- **Print layout engine** — Compose cartographic map sheets: map frame, title, legend, scale bar, north arrow, overview inset, graticule, text/image elements, paper sizes (A4/A3/Letter/Tabloid), configurable DPI (72–600+)
 
 ## Architecture
 
