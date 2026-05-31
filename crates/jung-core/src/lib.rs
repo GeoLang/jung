@@ -31,6 +31,7 @@ pub mod curved_label;
 pub mod label_priority;
 pub mod mvt;
 pub mod ogc;
+pub mod print_layout;
 pub mod sld;
 pub mod symbols;
 pub mod text;
