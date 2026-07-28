@@ -36,7 +36,7 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 - **Rule-Based Cascading** — multiple rules per feature with priority cascade, zoom-bounded rules, expression-based filters, source tracking for debugging
 
 ### GPU Rendering
-- **Vello Backend** — GPU-accelerated rendering via `jung-vello` crate, scene graph construction, wgpu integration
+- **Vello Backend** — `jung-vello` builds a `vello::Scene` from styled features. Submitting that scene to a GPU is the caller's job, jung does not own a wgpu device
 - **Layer Composition** — per-layer scene building with configurable paint properties
 - **Coordinate Projection** — geographic-to-screen transform with bbox mapping
 
@@ -45,12 +45,14 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 - **Well-Known Binary (WKB)** — binary geometry serialization (little-endian)
 - **Filter Encoding** — property comparisons, LIKE patterns, logical operators (AND/OR/NOT), BBox spatial filter
 - **Simple Features** — envelope, area, length, centroid operations
+- **SLD/SE 1.1** — parse Styled Layer Descriptor XML into jung rules and export jung styles back to SLD
 
 ### Output Formats
 - **Raster (RGBA pixels)** — direct pixel buffer output for tile generation
 - **SVG Vector Export** — circles, paths, polygons, text, groups with transforms, proper XML escaping
 - **High-DPI Print** — configurable DPI (72/300/600+), paper sizes (A4 etc.), margins, scale bars, north arrows
-- **GPU (Vello/wgpu)** — hardware-accelerated vector rendering via scene graph
+- **Print layout engine** — compose cartographic map sheets: map frame, title, legend, scale bar, north arrow, overview inset, graticule, text/image elements, paper sizes (A4/A3/Letter/Tabloid)
+- **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer
 - **WebAssembly** — full engine in the browser via wasm-bindgen
 
 ### Input Formats
@@ -61,7 +63,6 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
 - **Custom Functions** — user-defined function registry with built-ins: `clamp`, `lerp`, `pow`, `sqrt`, `log`, `log10`, `len`, `contains`, `if_null`
 - **StyleValue&lt;T&gt;** — expressions or literals for any style property, enabling fully data-driven maps
-- **Print layout engine** — Compose cartographic map sheets: map frame, title, legend, scale bar, north arrow, overview inset, graticule, text/image elements, paper sizes (A4/A3/Letter/Tabloid), configurable DPI (72–600+)
 
 ## Architecture
 
@@ -113,7 +114,12 @@ jung-core/
 ├── maritime.rs       — S-52/S-57 nautical chart symbology
 ├── topographic.rs    — Contours, hillshade, hypsometric tinting
 ├── ogc.rs            — OGC WKT/WKB, Filter Encoding, Simple Features ops
+├── sld.rs            — SLD/SE 1.1 XML import and export
 ├── rules.rs          — Rule-based cascading style engine
+├── tiling.rs         — XYZ slippy-map tile addressing and per-tile clipping
+├── label_priority.rs — Priority-ordered label placement with a deconfliction grid
+├── layout.rs         — Print layout composer (frames, legends, tables)
+├── print_layout.rs   — Page layout to SVG for print output
 └── output.rs         — SVG export, print output, map furniture
 
 jung-vello/
@@ -363,7 +369,7 @@ Jung uses a Mapbox GL-compatible style format:
 # Build all crates
 cargo build --all
 
-# Run tests (202 tests)
+# Run tests (229 tests)
 cargo test --all
 
 # Clippy lint check
