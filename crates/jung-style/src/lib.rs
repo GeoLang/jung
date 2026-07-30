@@ -9,7 +9,7 @@ pub mod expr;
 pub mod functions;
 mod parse;
 
-pub use parse::{Color, Layer, LineCap, LineJoin, Style, StyleError, parse_style};
+pub use parse::{Color, IconAnchor, Layer, LineCap, LineJoin, Style, StyleError, parse_style};
 
 pub use expr::{
     EvalContext, ExprValue, Expression, Interpolation, PropertyValue, StyleValue, evaluate,

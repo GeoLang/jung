@@ -57,6 +57,21 @@ pub enum LineJoin {
     Bevel,
 }
 
+/// Which part of the icon image sits on the point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconAnchor {
+    #[default]
+    Center,
+    Left,
+    Right,
+    Top,
+    Bottom,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
 /// A single symbology layer.
 #[derive(Debug, Clone)]
 pub struct Layer {
@@ -73,6 +88,11 @@ pub struct Layer {
     pub point_radius: Option<StyleValue<f32>>,
     pub icon_image: Option<StyleValue<String>>,
     pub icon_size: Option<StyleValue<f32>>,
+    /// Clockwise icon rotation in degrees.
+    pub icon_rotate: Option<StyleValue<f32>>,
+    pub icon_anchor: IconAnchor,
+    /// Extra [x, y] pixel shift applied after the anchor.
+    pub icon_offset: Option<[f32; 2]>,
     pub font_family: Option<String>,
     pub font_size: Option<StyleValue<f32>>,
     pub text_field: Option<StyleValue<String>>,
@@ -134,6 +154,12 @@ struct LayoutJson {
     icon_image: Option<serde_json::Value>,
     #[serde(rename = "icon-size")]
     icon_size: Option<serde_json::Value>,
+    #[serde(rename = "icon-rotate")]
+    icon_rotate: Option<serde_json::Value>,
+    #[serde(rename = "icon-anchor")]
+    icon_anchor: Option<String>,
+    #[serde(rename = "icon-offset")]
+    icon_offset: Option<[f32; 2]>,
 }
 
 /// Parse a JSON style string into a `Style`.
@@ -168,6 +194,14 @@ pub fn parse_style(json: &str) -> Result<Style, StyleError> {
             point_radius: parse_number_value(&l.paint.circle_radius),
             icon_image: parse_string_value(&l.layout.icon_image),
             icon_size: parse_number_value(&l.layout.icon_size),
+            icon_rotate: parse_number_value(&l.layout.icon_rotate),
+            icon_anchor: l
+                .layout
+                .icon_anchor
+                .as_deref()
+                .map(parse_icon_anchor)
+                .unwrap_or_default(),
+            icon_offset: l.layout.icon_offset,
             font_family: l.layout.text_font.as_ref().and_then(|f| f.first().cloned()),
             font_size: parse_number_value(&l.layout.text_size),
             text_field: parse_string_value(&l.layout.text_field),
@@ -230,6 +264,20 @@ fn parse_line_join(s: &str) -> LineJoin {
         "round" => LineJoin::Round,
         "bevel" => LineJoin::Bevel,
         _ => LineJoin::Miter,
+    }
+}
+
+fn parse_icon_anchor(s: &str) -> IconAnchor {
+    match s {
+        "left" => IconAnchor::Left,
+        "right" => IconAnchor::Right,
+        "top" => IconAnchor::Top,
+        "bottom" => IconAnchor::Bottom,
+        "top-left" => IconAnchor::TopLeft,
+        "top-right" => IconAnchor::TopRight,
+        "bottom-left" => IconAnchor::BottomLeft,
+        "bottom-right" => IconAnchor::BottomRight,
+        _ => IconAnchor::Center,
     }
 }
 
@@ -405,6 +453,74 @@ mod tests {
             Some(StyleValue::Literal("{name}".to_string()))
         );
         assert_eq!(style.layers[2].font_size, Some(StyleValue::Literal(14.0)));
+    }
+
+    #[test]
+    fn parse_icon_placement_properties() {
+        let json = r##"{
+            "layers": [
+                {
+                    "id": "pins",
+                    "layout": {
+                        "icon-image": "pin",
+                        "icon-size": 2.0,
+                        "icon-rotate": 45.0,
+                        "icon-anchor": "bottom-left",
+                        "icon-offset": [3.0, -4.0]
+                    }
+                }
+            ]
+        }"##;
+        let style = parse_style(json).unwrap();
+        let layer = &style.layers[0];
+        assert_eq!(
+            layer.icon_image,
+            Some(StyleValue::Literal("pin".to_string()))
+        );
+        assert_eq!(layer.icon_size, Some(StyleValue::Literal(2.0)));
+        assert_eq!(layer.icon_rotate, Some(StyleValue::Literal(45.0)));
+        assert_eq!(layer.icon_anchor, IconAnchor::BottomLeft);
+        assert_eq!(layer.icon_offset, Some([3.0, -4.0]));
+    }
+
+    #[test]
+    fn parse_icon_rotate_expression() {
+        let json = r##"{
+            "layers": [
+                {
+                    "id": "pins",
+                    "layout": {
+                        "icon-image": "pin",
+                        "icon-rotate": ["get", "heading"]
+                    }
+                }
+            ]
+        }"##;
+        let style = parse_style(json).unwrap();
+        assert!(matches!(
+            style.layers[0].icon_rotate,
+            Some(StyleValue::Expression(_))
+        ));
+    }
+
+    #[test]
+    fn icon_placement_defaults() {
+        let json = r##"{
+            "layers": [
+                { "id": "pins", "layout": { "icon-image": "pin" } }
+            ]
+        }"##;
+        let style = parse_style(json).unwrap();
+        let layer = &style.layers[0];
+        assert_eq!(layer.icon_rotate, None);
+        assert_eq!(layer.icon_anchor, IconAnchor::Center);
+        assert_eq!(layer.icon_offset, None);
+    }
+
+    #[test]
+    fn unknown_icon_anchor_falls_back_to_center() {
+        assert_eq!(parse_icon_anchor("nonsense"), IconAnchor::Center);
+        assert_eq!(parse_icon_anchor("top-right"), IconAnchor::TopRight);
     }
 
     #[test]

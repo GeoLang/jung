@@ -200,7 +200,7 @@ fn blend_pixel(buffer: &mut PixelBuffer, x: u32, y: u32, color: Color) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jung_style::{LineCap, LineJoin, StyleValue};
+    use jung_style::{IconAnchor, LineCap, LineJoin, StyleValue};
     use std::collections::HashMap;
 
     fn test_bbox() -> BBox {
@@ -227,6 +227,9 @@ mod tests {
             point_radius: None,
             icon_image: None,
             icon_size: None,
+            icon_rotate: None,
+            icon_anchor: IconAnchor::Center,
+            icon_offset: None,
             font_family: None,
             font_size: None,
             text_field: None,

@@ -252,7 +252,7 @@ fn geometry_type_str(geom: &Geometry) -> &'static str {
 mod tests {
     use super::*;
     use jung_core::geometry::Feature;
-    use jung_style::{LineCap, LineJoin};
+    use jung_style::{IconAnchor, LineCap, LineJoin};
     use std::collections::HashMap;
 
     fn test_bbox() -> BBox {
@@ -279,6 +279,9 @@ mod tests {
             point_radius: None,
             icon_image: None,
             icon_size: None,
+            icon_rotate: None,
+            icon_anchor: IconAnchor::Center,
+            icon_offset: None,
             font_family: None,
             font_size: None,
             text_field: None,

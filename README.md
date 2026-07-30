@@ -338,6 +338,9 @@ Jung uses a Mapbox GL-compatible style format:
 | `circle-radius` | number | ✓ | Point circle radius |
 | `icon-image` | string | ✓ | Sprite name for icon |
 | `icon-size` | number | ✓ | Icon scale factor |
+| `icon-rotate` | number | ✓ | Icon rotation, degrees clockwise |
+| `icon-anchor` | enum | | `center`, `left`, `right`, `top`, `bottom`, `top-left`, `top-right`, `bottom-left`, `bottom-right` |
+| `icon-offset` | number[2] | | Extra [x, y] pixel shift after the anchor |
 | `text-color` | color | ✓ | Label text color |
 | `text-field` | string | ✓ | Property for label text |
 | `text-size` | number | ✓ | Font size |
@@ -369,7 +372,7 @@ Jung uses a Mapbox GL-compatible style format:
 # Build all crates
 cargo build --all
 
-# Run tests (229 tests)
+# Run tests (242 tests)
 cargo test --all
 
 # Clippy lint check

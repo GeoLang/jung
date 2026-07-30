@@ -1,6 +1,6 @@
 use crate::geometry::{Feature, Geometry, Point};
 use crate::line::{LineParams, render_line};
-use crate::marker::{SpriteAtlas, blit_icon};
+use crate::marker::{IconPlacement, SpriteAtlas, blit_icon_placed};
 use crate::polygon::render_polygon;
 use jung_style::{Color, EvalContext, Layer, Style, StyleValue};
 use thiserror::Error;
@@ -218,8 +218,16 @@ impl Renderer {
             .and_then(|sv| sv.resolve(ctx))
             .and_then(|name| sprites.and_then(|atlas| atlas.get(&name)))
         {
-            let scale = resolve_f32(&layer.icon_size, ctx).unwrap_or(1.0) as f64;
-            blit_icon(buffer, icon, px, py, scale);
+            let placement = IconPlacement {
+                anchor: layer.icon_anchor,
+                offset: layer
+                    .icon_offset
+                    .map(|[ox, oy]| [ox as f64, oy as f64])
+                    .unwrap_or([0.0, 0.0]),
+                rotation_deg: resolve_f32(&layer.icon_rotate, ctx).unwrap_or(0.0) as f64,
+                scale: resolve_f32(&layer.icon_size, ctx).unwrap_or(1.0) as f64,
+            };
+            blit_icon_placed(buffer, icon, px, py, &placement);
             return;
         }
 
@@ -279,7 +287,7 @@ fn resolve_f32(val: &Option<StyleValue<f32>>, ctx: &EvalContext) -> Option<f32> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jung_style::{LineCap, LineJoin, StyleValue};
+    use jung_style::{IconAnchor, LineCap, LineJoin, StyleValue};
     use std::collections::HashMap;
 
     fn test_style() -> Style {
@@ -304,6 +312,9 @@ mod tests {
                 point_radius: Some(StyleValue::Literal(3.0)),
                 icon_image: None,
                 icon_size: None,
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -393,6 +404,9 @@ mod tests {
                 point_radius: None,
                 icon_image: None,
                 icon_size: None,
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -520,6 +534,9 @@ mod tests {
                 point_radius: None,
                 icon_image: None,
                 icon_size: None,
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -582,6 +599,9 @@ mod tests {
                 point_radius: None,
                 icon_image: None,
                 icon_size: None,
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -704,6 +724,9 @@ mod tests {
                 point_radius: None,
                 icon_image: None,
                 icon_size: None,
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -805,6 +828,9 @@ mod tests {
                 point_radius: None,
                 icon_image: None,
                 icon_size: None,
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -869,6 +895,9 @@ mod tests {
                 point_radius: None,
                 icon_image: Some(StyleValue::Literal("pin".to_string())),
                 icon_size: Some(StyleValue::Literal(1.0)),
+                icon_rotate: None,
+                icon_anchor: IconAnchor::Center,
+                icon_offset: None,
                 font_family: None,
                 font_size: None,
                 text_field: None,
@@ -898,5 +927,82 @@ mod tests {
         assert_eq!(result.data[idx + 1], 0); // G
         assert_eq!(result.data[idx + 2], 255); // B
         assert_eq!(result.data[idx + 3], 255); // A
+    }
+
+    #[test]
+    fn render_icon_with_anchor_offset_and_rotation() {
+        use crate::marker::{Icon, IconPlacement, SpriteAtlas, blit_icon_placed};
+
+        let renderer = Renderer::new(64, 64).unwrap();
+        let mut atlas = SpriteAtlas::new();
+        // asymmetric icon so rotation is observable
+        let mut data = vec![0u8; 6 * 6 * 4];
+        for (px, py) in [(0usize, 0usize), (1, 0), (2, 0), (0, 1)] {
+            let i = (py * 6 + px) * 4;
+            data[i + 2] = 255;
+            data[i + 3] = 255;
+        }
+        let icon = Icon::new(6, 6, data).unwrap();
+        atlas.insert("pin", icon.clone());
+
+        let style = Style {
+            name: "icon-placement".to_string(),
+            layers: vec![Layer {
+                id: "icons".to_string(),
+                source: None,
+                fill_color: None,
+                stroke_color: None,
+                stroke_width: None,
+                line_cap: LineCap::Butt,
+                line_join: LineJoin::Miter,
+                line_dasharray: None,
+                line_offset: None,
+                line_opacity: None,
+                point_radius: None,
+                icon_image: Some(StyleValue::Literal("pin".to_string())),
+                icon_size: Some(StyleValue::Literal(1.0)),
+                icon_rotate: Some(StyleValue::Literal(90.0)),
+                icon_anchor: IconAnchor::TopLeft,
+                icon_offset: Some([4.0, -3.0]),
+                font_family: None,
+                font_size: None,
+                text_field: None,
+                text_color: None,
+            }],
+        };
+        let bbox = BBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+        };
+        let features = vec![Feature {
+            geometry: Geometry::Point(Point { x: 0.5, y: 0.5 }),
+            properties: HashMap::new(),
+        }];
+
+        let result = renderer
+            .render_with_sprites(&style, &features, &bbox, 0.0, &atlas)
+            .unwrap();
+
+        let mut expected = PixelBuffer::new(64, 64);
+        blit_icon_placed(
+            &mut expected,
+            &icon,
+            32.0,
+            32.0,
+            &IconPlacement {
+                anchor: IconAnchor::TopLeft,
+                offset: [4.0, -3.0],
+                rotation_deg: 90.0,
+                scale: 1.0,
+            },
+        );
+        assert_eq!(result.data, expected.data);
+
+        // and it differs from the unplaced default
+        let mut plain = PixelBuffer::new(64, 64);
+        blit_icon_placed(&mut plain, &icon, 32.0, 32.0, &IconPlacement::default());
+        assert_ne!(result.data, plain.data);
     }
 }

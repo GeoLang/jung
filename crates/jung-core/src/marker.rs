@@ -1,4 +1,5 @@
 use crate::renderer::PixelBuffer;
+use jung_style::IconAnchor;
 
 /// A sprite icon image (RGBA pixel data).
 #[derive(Debug, Clone)]
@@ -161,8 +162,58 @@ impl Icon {
     }
 }
 
+/// How an icon sits on a point: which part of the image is the anchor, an extra pixel
+/// offset applied after the anchor, clockwise rotation in degrees, and a scale factor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct IconPlacement {
+    pub anchor: IconAnchor,
+    pub offset: [f64; 2],
+    pub rotation_deg: f64,
+    pub scale: f64,
+}
+
+impl Default for IconPlacement {
+    fn default() -> Self {
+        Self {
+            anchor: IconAnchor::Center,
+            offset: [0.0, 0.0],
+            rotation_deg: 0.0,
+            scale: 1.0,
+        }
+    }
+}
+
+/// The unrotated destination rectangle of an icon, in buffer pixels.
+struct DestRect {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+
 /// Blit (alpha-composite) an icon onto a pixel buffer at the given center position.
 pub fn blit_icon(buffer: &mut PixelBuffer, icon: &Icon, center_x: f64, center_y: f64, scale: f64) {
+    blit_icon_placed(
+        buffer,
+        icon,
+        center_x,
+        center_y,
+        &IconPlacement {
+            scale,
+            ..Default::default()
+        },
+    );
+}
+
+/// Blit (alpha-composite) an icon onto a pixel buffer with an anchor, offset and rotation.
+pub fn blit_icon_placed(
+    buffer: &mut PixelBuffer,
+    icon: &Icon,
+    x: f64,
+    y: f64,
+    placement: &IconPlacement,
+) {
+    let scale = placement.scale;
     let scaled_w = (icon.width as f64 * scale) as i32;
     let scaled_h = (icon.height as f64 * scale) as i32;
 
@@ -170,13 +221,50 @@ pub fn blit_icon(buffer: &mut PixelBuffer, icon: &Icon, center_x: f64, center_y:
         return;
     }
 
-    let start_x = center_x as i32 - scaled_w / 2;
-    let start_y = center_y as i32 - scaled_h / 2;
+    let anchor_x = x + placement.offset[0];
+    let anchor_y = y + placement.offset[1];
+    let (dx, dy) = anchor_origin(placement.anchor, scaled_w, scaled_h);
+    let rect = DestRect {
+        x: anchor_x as i32 + dx,
+        y: anchor_y as i32 + dy,
+        w: scaled_w,
+        h: scaled_h,
+    };
 
-    for dy in 0..scaled_h {
-        for dx in 0..scaled_w {
-            let dest_x = start_x + dx;
-            let dest_y = start_y + dy;
+    if placement.rotation_deg == 0.0 {
+        blit_axis_aligned(buffer, icon, &rect, scale);
+    } else {
+        blit_rotated(
+            buffer,
+            icon,
+            &rect,
+            scale,
+            (anchor_x, anchor_y),
+            placement.rotation_deg,
+        );
+    }
+}
+
+/// Top-left corner of the drawn image relative to the anchor point.
+fn anchor_origin(anchor: IconAnchor, w: i32, h: i32) -> (i32, i32) {
+    match anchor {
+        IconAnchor::Center => (-w / 2, -h / 2),
+        IconAnchor::Left => (0, -h / 2),
+        IconAnchor::Right => (-w, -h / 2),
+        IconAnchor::Top => (-w / 2, 0),
+        IconAnchor::Bottom => (-w / 2, -h),
+        IconAnchor::TopLeft => (0, 0),
+        IconAnchor::TopRight => (-w, 0),
+        IconAnchor::BottomLeft => (0, -h),
+        IconAnchor::BottomRight => (-w, -h),
+    }
+}
+
+fn blit_axis_aligned(buffer: &mut PixelBuffer, icon: &Icon, rect: &DestRect, scale: f64) {
+    for dy in 0..rect.h {
+        for dx in 0..rect.w {
+            let dest_x = rect.x + dx;
+            let dest_y = rect.y + dy;
 
             if dest_x < 0
                 || dest_y < 0
@@ -189,38 +277,102 @@ pub fn blit_icon(buffer: &mut PixelBuffer, icon: &Icon, center_x: f64, center_y:
             // Sample source pixel (nearest-neighbor for scale != 1.0)
             let src_x = ((dx as f64 / scale) as u32).min(icon.width - 1);
             let src_y = ((dy as f64 / scale) as u32).min(icon.height - 1);
-            let src_idx = ((src_y * icon.width + src_x) * 4) as usize;
-
-            let sa = icon.data[src_idx + 3] as u32;
-            if sa == 0 {
-                continue;
-            }
-
-            let sr = icon.data[src_idx] as u32;
-            let sg = icon.data[src_idx + 1] as u32;
-            let sb = icon.data[src_idx + 2] as u32;
-
-            let dest_idx = ((dest_y as u32 * buffer.width + dest_x as u32) * 4) as usize;
-            let da = buffer.data[dest_idx + 3] as u32;
-            let dr = buffer.data[dest_idx] as u32;
-            let dg = buffer.data[dest_idx + 1] as u32;
-            let db = buffer.data[dest_idx + 2] as u32;
-
-            // Alpha compositing (src over dst)
-            let out_a = sa + da * (255 - sa) / 255;
-            if out_a == 0 {
-                continue;
-            }
-            let out_r = (sr * sa + dr * da * (255 - sa) / 255) / out_a;
-            let out_g = (sg * sa + dg * da * (255 - sa) / 255) / out_a;
-            let out_b = (sb * sa + db * da * (255 - sa) / 255) / out_a;
-
-            buffer.data[dest_idx] = out_r.min(255) as u8;
-            buffer.data[dest_idx + 1] = out_g.min(255) as u8;
-            buffer.data[dest_idx + 2] = out_b.min(255) as u8;
-            buffer.data[dest_idx + 3] = out_a.min(255) as u8;
+            composite_pixel(buffer, dest_x as u32, dest_y as u32, icon, src_x, src_y);
         }
     }
+}
+
+fn blit_rotated(
+    buffer: &mut PixelBuffer,
+    icon: &Icon,
+    rect: &DestRect,
+    scale: f64,
+    pivot: (f64, f64),
+    rotation_deg: f64,
+) {
+    let (sin, cos) = rotation_deg.to_radians().sin_cos();
+    let (x0, y0) = (rect.x as f64, rect.y as f64);
+    let (x1, y1) = (x0 + rect.w as f64, y0 + rect.h as f64);
+
+    // scan the rotated bounds so the image is never clipped at its unrotated extent
+    let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(cx, cy)| {
+        let (rx, ry) = (cx - pivot.0, cy - pivot.1);
+        (pivot.0 + rx * cos - ry * sin, pivot.1 + rx * sin + ry * cos)
+    });
+    let min_x = corners.iter().map(|c| c.0).fold(f64::INFINITY, f64::min);
+    let max_x = corners
+        .iter()
+        .map(|c| c.0)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = corners.iter().map(|c| c.1).fold(f64::INFINITY, f64::min);
+    let max_y = corners
+        .iter()
+        .map(|c| c.1)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let scan_x0 = min_x.floor().max(0.0) as i32;
+    let scan_y0 = min_y.floor().max(0.0) as i32;
+    let scan_x1 = max_x.ceil().min(buffer.width as f64) as i32;
+    let scan_y1 = max_y.ceil().min(buffer.height as f64) as i32;
+
+    for dest_y in scan_y0..scan_y1 {
+        for dest_x in scan_x0..scan_x1 {
+            // inverse-rotate the destination pixel centre back into unrotated image space
+            let rx = dest_x as f64 + 0.5 - pivot.0;
+            let ry = dest_y as f64 + 0.5 - pivot.1;
+            let lx = pivot.0 + rx * cos + ry * sin - x0;
+            let ly = pivot.1 - rx * sin + ry * cos - y0;
+
+            if lx < 0.0 || ly < 0.0 || lx >= rect.w as f64 || ly >= rect.h as f64 {
+                continue;
+            }
+
+            let src_x = ((lx / scale) as u32).min(icon.width - 1);
+            let src_y = ((ly / scale) as u32).min(icon.height - 1);
+            composite_pixel(buffer, dest_x as u32, dest_y as u32, icon, src_x, src_y);
+        }
+    }
+}
+
+/// Alpha-composite one icon pixel (src over dst) into the buffer.
+fn composite_pixel(
+    buffer: &mut PixelBuffer,
+    dest_x: u32,
+    dest_y: u32,
+    icon: &Icon,
+    src_x: u32,
+    src_y: u32,
+) {
+    let src_idx = ((src_y * icon.width + src_x) * 4) as usize;
+
+    let sa = icon.data[src_idx + 3] as u32;
+    if sa == 0 {
+        return;
+    }
+
+    let sr = icon.data[src_idx] as u32;
+    let sg = icon.data[src_idx + 1] as u32;
+    let sb = icon.data[src_idx + 2] as u32;
+
+    let dest_idx = ((dest_y * buffer.width + dest_x) * 4) as usize;
+    let da = buffer.data[dest_idx + 3] as u32;
+    let dr = buffer.data[dest_idx] as u32;
+    let dg = buffer.data[dest_idx + 1] as u32;
+    let db = buffer.data[dest_idx + 2] as u32;
+
+    // Alpha compositing (src over dst)
+    let out_a = sa + da * (255 - sa) / 255;
+    if out_a == 0 {
+        return;
+    }
+    let out_r = (sr * sa + dr * da * (255 - sa) / 255) / out_a;
+    let out_g = (sg * sa + dg * da * (255 - sa) / 255) / out_a;
+    let out_b = (sb * sa + db * da * (255 - sa) / 255) / out_a;
+
+    buffer.data[dest_idx] = out_r.min(255) as u8;
+    buffer.data[dest_idx + 1] = out_g.min(255) as u8;
+    buffer.data[dest_idx + 2] = out_b.min(255) as u8;
+    buffer.data[dest_idx + 3] = out_a.min(255) as u8;
 }
 
 /// Point-in-polygon test for floating-point coordinates (ray-casting).
@@ -322,6 +474,191 @@ mod tests {
         // Center should be filled
         let center = ((8 * 17 + 8) * 4) as usize;
         assert_eq!(icon.data[center + 3], 255);
+    }
+
+    /// 4x4 icon with an opaque L in the top-left corner, so a wrong rotation
+    /// direction cannot pass.
+    fn asymmetric_icon() -> Icon {
+        let mut data = vec![0u8; 4 * 4 * 4];
+        for (px, py) in [(0, 0), (1, 0), (0, 1)] {
+            let idx = ((py * 4 + px) * 4) as usize;
+            data[idx] = 255;
+            data[idx + 3] = 255;
+        }
+        Icon::new(4, 4, data).unwrap()
+    }
+
+    /// Opaque pixel coordinates in row-major order.
+    fn opaque_pixels(buffer: &PixelBuffer) -> Vec<(u32, u32)> {
+        let mut out = Vec::new();
+        for y in 0..buffer.height {
+            for x in 0..buffer.width {
+                let idx = ((y * buffer.width + x) * 4) as usize;
+                if buffer.data[idx + 3] > 0 {
+                    out.push((x, y));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn placed_center_matches_blit_icon() {
+        let icon = Icon::star(6, 255, 0, 0, 255);
+        let mut old = PixelBuffer::new(64, 64);
+        let mut new = PixelBuffer::new(64, 64);
+        blit_icon(&mut old, &icon, 17.3, 40.8, 2.0);
+        blit_icon_placed(
+            &mut new,
+            &icon,
+            17.3,
+            40.8,
+            &IconPlacement {
+                scale: 2.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(old.data, new.data);
+    }
+
+    #[test]
+    fn anchor_top_left_puts_corner_on_point() {
+        let mut buffer = PixelBuffer::new(32, 32);
+        let icon = Icon::square(4, 0, 255, 0, 255);
+        blit_icon_placed(
+            &mut buffer,
+            &icon,
+            10.0,
+            10.0,
+            &IconPlacement {
+                anchor: IconAnchor::TopLeft,
+                ..Default::default()
+            },
+        );
+        let pixels = opaque_pixels(&buffer);
+        assert_eq!(pixels.first(), Some(&(10, 10)));
+        assert_eq!(pixels.last(), Some(&(13, 13)));
+        assert_eq!(pixels.len(), 16);
+    }
+
+    #[test]
+    fn anchor_bottom_puts_image_above_point() {
+        let mut buffer = PixelBuffer::new(32, 32);
+        let icon = Icon::square(4, 0, 255, 0, 255);
+        blit_icon_placed(
+            &mut buffer,
+            &icon,
+            10.0,
+            10.0,
+            &IconPlacement {
+                anchor: IconAnchor::Bottom,
+                ..Default::default()
+            },
+        );
+        let pixels = opaque_pixels(&buffer);
+        assert_eq!(pixels.first(), Some(&(8, 6)));
+        assert_eq!(pixels.last(), Some(&(11, 9)));
+    }
+
+    #[test]
+    fn offset_shifts_placement() {
+        let mut buffer = PixelBuffer::new(32, 32);
+        let icon = Icon::square(4, 0, 255, 0, 255);
+        blit_icon_placed(
+            &mut buffer,
+            &icon,
+            10.0,
+            10.0,
+            &IconPlacement {
+                anchor: IconAnchor::TopLeft,
+                offset: [3.0, -2.0],
+                ..Default::default()
+            },
+        );
+        let pixels = opaque_pixels(&buffer);
+        assert_eq!(pixels.first(), Some(&(13, 8)));
+        assert_eq!(pixels.last(), Some(&(16, 11)));
+    }
+
+    #[test]
+    fn zero_rotation_matches_unrotated() {
+        let icon = asymmetric_icon();
+        let mut plain = PixelBuffer::new(32, 32);
+        let mut rotated = PixelBuffer::new(32, 32);
+        blit_icon(&mut plain, &icon, 10.0, 10.0, 1.0);
+        blit_icon_placed(
+            &mut rotated,
+            &icon,
+            10.0,
+            10.0,
+            &IconPlacement {
+                rotation_deg: 0.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(plain.data, rotated.data);
+        assert_eq!(opaque_pixels(&plain), vec![(8, 8), (9, 8), (8, 9)]);
+    }
+
+    #[test]
+    fn rotate_90_clockwise() {
+        let mut buffer = PixelBuffer::new(32, 32);
+        blit_icon_placed(
+            &mut buffer,
+            &asymmetric_icon(),
+            10.0,
+            10.0,
+            &IconPlacement {
+                rotation_deg: 90.0,
+                ..Default::default()
+            },
+        );
+        // the L in the top-left corner lands in the top-right corner
+        assert_eq!(opaque_pixels(&buffer), vec![(10, 8), (11, 8), (11, 9)]);
+    }
+
+    #[test]
+    fn rotate_180() {
+        let mut buffer = PixelBuffer::new(32, 32);
+        blit_icon_placed(
+            &mut buffer,
+            &asymmetric_icon(),
+            10.0,
+            10.0,
+            &IconPlacement {
+                rotation_deg: 180.0,
+                ..Default::default()
+            },
+        );
+        assert_eq!(opaque_pixels(&buffer), vec![(11, 10), (10, 11), (11, 11)]);
+    }
+
+    #[test]
+    fn rotation_near_edges_does_not_panic() {
+        let icon = Icon::square(5, 255, 0, 0, 255);
+        for (x, y) in [
+            (0.0, 0.0),
+            (-3.0, -3.0),
+            (63.0, 63.0),
+            (70.0, 10.0),
+            (10.0, -70.0),
+        ] {
+            let mut buffer = PixelBuffer::new(16, 16);
+            for deg in [37.0, 90.0, 145.0, -60.0, 359.5] {
+                blit_icon_placed(
+                    &mut buffer,
+                    &icon,
+                    x,
+                    y,
+                    &IconPlacement {
+                        anchor: IconAnchor::BottomRight,
+                        offset: [2.0, -2.0],
+                        rotation_deg: deg,
+                        scale: 1.5,
+                    },
+                );
+            }
+        }
     }
 
     #[test]
