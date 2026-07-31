@@ -58,6 +58,7 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 ### Input Formats
 - **GeoJSON** — standard feature collections
 - **Mapbox Vector Tiles (MVT/PBF)** — zero-dependency protobuf decoder, geometry command parsing, zigzag coordinate decoding, attribute extraction
+- **Esri drawingInfo** (`jung-esri`), translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, and whatever cannot be reproduced (picture symbols, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) comes back in a structured loss list naming the esri value it gave up on
 
 ### Expression Engine
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
@@ -86,6 +87,7 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 |-------|-------------|
 | `jung-core` | Core rendering engine: geometry, symbology, classification, OGC standards, output |
 | `jung-style` | Style specification parser (Mapbox GL JSON), expression engine, custom functions |
+| `jung-esri` | Esri `drawingInfo` to Mapbox GL style translator, with a loss report |
 | `jung-vello` | GPU-accelerated rendering backend via Vello/wgpu |
 | `jung-wasm` | WebAssembly bindings for browser-side rendering |
 | `jung-cli` | Command-line tool for batch rendering |
@@ -129,6 +131,12 @@ jung-style/
 ├── expr.rs           — Expression AST, evaluation, StyleValue<T>
 ├── functions.rs      — Custom function registry
 └── parse.rs          — JSON style parser (Mapbox GL compatible)
+
+jung-esri/
+├── convert.rs        — Esri colors, point to pixel sizes
+├── symbol.rs         — esriSMS/esriSLS/esriSFS symbols to paint properties
+├── label.rs          — labelingInfo to a symbol layer
+└── lib.rs            — Renderer translation, layer assembly, loss list
 ```
 
 ## Quick Start
@@ -372,7 +380,7 @@ Jung uses a Mapbox GL-compatible style format:
 # Build all crates
 cargo build --all
 
-# Run tests (242 tests)
+# Run tests (293 tests)
 cargo test --all
 
 # Clippy lint check

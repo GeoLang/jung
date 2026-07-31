@@ -600,6 +600,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "jung-esri"
+version = "0.1.0"
+dependencies = [
+ "jung-style",
+ "serde_json",
+]
+
+[[package]]
 name = "jung-style"
 version = "0.1.0"
 dependencies = [
