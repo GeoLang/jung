@@ -1,5 +1,9 @@
 //! pins compatibility with the mapbox gl model jung consumes: every layer this crate
 //! emits has to survive jung-style's parser, and the expressions have to evaluate
+//!
+//! jung-style reads icon-image, icon-size, icon-rotate, icon-anchor and icon-offset, but
+//! it has no fill-pattern property, so a picture fill layer is only checked for parsing
+//! and for its image name being a valid expression, not for reaching jung's model
 
 mod fixtures;
 
@@ -23,6 +27,17 @@ fn all() -> Vec<(&'static str, Value, Geometry)> {
             Geometry::Line,
         ),
         ("labeled_point", fixtures::labeled_point(), Geometry::Point),
+        ("picture_point", fixtures::picture_point(), Geometry::Point),
+        (
+            "picture_unique_value_point",
+            fixtures::picture_unique_value_point(),
+            Geometry::Point,
+        ),
+        (
+            "picture_fill_polygon",
+            fixtures::picture_fill_polygon(),
+            Geometry::Polygon,
+        ),
     ]
 }
 
@@ -141,6 +156,41 @@ fn label_text_field_evaluates_per_feature() {
         label.text_color,
         Some(StyleValue::Literal(Color::rgb(39, 39, 39)))
     );
+}
+
+#[test]
+fn picture_marker_reaches_jungs_model() {
+    let out = translate(&fixtures::picture_point(), &source(), Geometry::Point);
+    let style = parse_style(&style_of(&out)).unwrap();
+    let layer = &style.layers[0];
+    assert_eq!(
+        layer.icon_image,
+        Some(StyleValue::Literal("wells-image".to_string()))
+    );
+    assert_eq!(layer.icon_rotate, Some(StyleValue::Literal(270.0)));
+    // the bitmap is registered at its own size, so the layer never scales it
+    assert_eq!(layer.icon_size, None);
+    assert!(out.images.contains_key("wells-image"));
+}
+
+#[test]
+fn picture_icon_image_evaluates_per_feature() {
+    let out = translate(
+        &fixtures::picture_unique_value_point(),
+        &source(),
+        Geometry::Point,
+    );
+    let style = parse_style(&style_of(&out)).unwrap();
+    let icon = style.layers[1].icon_image.clone().unwrap();
+
+    let well = props(&[("KIND", PropertyValue::String("well".into()))]);
+    assert_eq!(
+        icon.resolve(&ctx(&well, "Point")),
+        Some("wells-image-0".to_string())
+    );
+    // the vector branch draws no icon, the circle layer paints it instead
+    let dry = props(&[("KIND", PropertyValue::String("dry".into()))]);
+    assert_eq!(icon.resolve(&ctx(&dry, "Point")), Some(String::new()));
 }
 
 fn props(entries: &[(&str, PropertyValue)]) -> HashMap<String, PropertyValue> {

@@ -1,6 +1,9 @@
-use crate::convert::{color, loss, number, px, text};
-use crate::{Geometry, Loss};
+use crate::convert::{color, loss, number, px, round2, text};
+use crate::{Geometry, Loss, TranslatedImage};
 use serde_json::Value;
+
+/// stand in size when a picture symbol does not say how big it is
+const PICTURE_POINTS: f64 = 12.0;
 
 /// a translated line, used for line symbols and for outlines
 #[derive(Clone, Debug, PartialEq)]
@@ -24,12 +27,24 @@ pub(crate) struct Fill {
     pub stroke: Option<Stroke>,
 }
 
+/// a bitmap marker lifted out of an esriPMS symbol
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Picture {
+    pub image: TranslatedImage,
+    /// clockwise degrees for icon-rotate, 0 when the symbol is not rotated
+    pub rotate: f64,
+}
+
 /// what a single esri symbol paints
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Paint {
     Marker(Marker),
     Line(Stroke),
     Fill(Fill),
+    /// esriPMS with an inline image
+    PictureMarker(Picture),
+    /// esriPFS with an inline image
+    PictureFill(TranslatedImage),
     /// nothing to draw, either refused or an esri null style
     Nothing,
 }
@@ -38,6 +53,20 @@ impl Paint {
     pub(crate) fn marker(&self) -> Option<&Marker> {
         match self {
             Paint::Marker(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn picture_marker(&self) -> Option<&Picture> {
+        match self {
+            Paint::PictureMarker(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn picture_fill(&self) -> Option<&TranslatedImage> {
+        match self {
+            Paint::PictureFill(image) => Some(image),
             _ => None,
         }
     }
@@ -61,6 +90,8 @@ impl Paint {
             Paint::Marker(_) => "esriSMS",
             Paint::Line(_) => "esriSLS",
             Paint::Fill(_) => "esriSFS",
+            Paint::PictureMarker(_) => "esriPMS",
+            Paint::PictureFill(_) => "esriPFS",
             Paint::Nothing => "none",
         }
     }
@@ -88,9 +119,9 @@ pub(crate) fn parse(
 ) -> Paint {
     let paint = parse_kind(symbol, path, losses);
     let matches_geometry = match geometry {
-        Geometry::Point => paint.marker().is_some(),
+        Geometry::Point => paint.marker().is_some() || paint.picture_marker().is_some(),
         Geometry::Line => paint.line().is_some(),
-        Geometry::Polygon => paint.fill().is_some(),
+        Geometry::Polygon => paint.fill().is_some() || paint.picture_fill().is_some(),
     };
     if !matches_geometry && paint != Paint::Nothing {
         loss(
@@ -122,22 +153,33 @@ fn parse_kind(symbol: Option<&Value>, path: &str, losses: &mut Vec<Loss>) -> Pai
             None => Paint::Nothing,
         },
         "esriSFS" => fill(sym, path, losses),
-        "esriPMS" => {
-            loss(
-                losses,
-                format!("{path}.type: esriPMS"),
-                "picture marker symbols need a sprite image, not translated",
-            );
-            Paint::Nothing
-        }
-        "esriPFS" => {
-            loss(
-                losses,
-                format!("{path}.type: esriPFS"),
-                "picture fill symbols need a sprite image, not translated",
-            );
-            Paint::Nothing
-        }
+        "esriPMS" => match picture_image(sym, path, losses) {
+            Some(image) => Paint::PictureMarker(Picture {
+                image,
+                rotate: number(sym, "angle").map_or(0.0, icon_rotate),
+            }),
+            None => Paint::Nothing,
+        },
+        "esriPFS" => match picture_image(sym, path, losses) {
+            Some(image) => {
+                if number(sym, "angle").is_some_and(|a| a != 0.0) {
+                    loss(
+                        losses,
+                        format!("{path}.angle"),
+                        "picture fill rotation is not translated, fill-pattern cannot rotate",
+                    );
+                }
+                if sym.get("outline").is_some_and(|o| !o.is_null()) {
+                    loss(
+                        losses,
+                        format!("{path}.outline"),
+                        "picture fill outlines are not translated",
+                    );
+                }
+                Paint::PictureFill(image)
+            }
+            None => Paint::Nothing,
+        },
         "esriTS" => {
             loss(
                 losses,
@@ -203,6 +245,73 @@ fn marker(sym: &Value, path: &str, losses: &mut Vec<Loss>) -> Paint {
         radius: px(size / 2.0),
         stroke: outline(sym, path, losses),
     })
+}
+
+/// the inline bitmap of a picture symbol, None when it only names a url
+///
+/// the base64 is copied into the data uri verbatim, nothing here decodes or checks the
+/// bytes, so a truncated or lying image reaches the consumer unchanged
+fn picture_image(sym: &Value, path: &str, losses: &mut Vec<Loss>) -> Option<TranslatedImage> {
+    let Some(data) = text(sym, "imageData") else {
+        match text(sym, "url") {
+            Some(url) => loss(
+                losses,
+                format!("{path}.url: {url}"),
+                "picture symbol has no inline imageData and this crate fetches nothing",
+            ),
+            None => loss(
+                losses,
+                format!("{path}.imageData"),
+                "picture symbol carries no image, nothing to draw",
+            ),
+        }
+        return None;
+    };
+    let Some(content_type) = text(sym, "contentType") else {
+        loss(
+            losses,
+            format!("{path}.contentType"),
+            "picture symbol has imageData without a content type, not translated",
+        );
+        return None;
+    };
+    let (width, height) = picture_size(sym, path, losses);
+    Some(TranslatedImage {
+        data_uri: format!("data:{content_type};base64,{data}"),
+        width,
+        height,
+    })
+}
+
+/// esri publishes picture width and height in points, a missing side copies the other one
+fn picture_size(sym: &Value, path: &str, losses: &mut Vec<Loss>) -> (f64, f64) {
+    // the conversion can overflow to infinity, which no consumer can register
+    let side = |key| {
+        number(sym, key)
+            .map(px)
+            .filter(|v| *v > 0.0 && v.is_finite())
+    };
+    let width = side("width");
+    let height = side("height");
+    if width.is_none() || height.is_none() {
+        loss(
+            losses,
+            format!("{path}.width/height"),
+            format!(
+                "picture size missing or not usable, the missing side copies the other side or {PICTURE_POINTS} points"
+            ),
+        );
+    }
+    let fallback = px(PICTURE_POINTS);
+    (
+        width.or(height).unwrap_or(fallback),
+        height.or(width).unwrap_or(fallback),
+    )
+}
+
+/// esri angles run counter clockwise from east, mapbox icon-rotate runs clockwise
+fn icon_rotate(angle: f64) -> f64 {
+    round2((-angle % 360.0 + 360.0) % 360.0)
 }
 
 fn outline(sym: &Value, path: &str, losses: &mut Vec<Loss>) -> Option<Stroke> {
@@ -465,12 +574,145 @@ mod tests {
     }
 
     #[test]
-    fn picture_symbols_are_refused() {
+    fn picture_symbols_without_image_data_are_refused_by_url() {
         let mut losses = Vec::new();
-        let sym = json!({ "type": "esriPMS", "url": "abc", "width": 10, "height": 10 });
+        let sym = json!({ "type": "esriPMS", "url": "abc.png", "width": 10, "height": 10 });
         assert_eq!(
             parse(Some(&sym), "renderer.symbol", Geometry::Point, &mut losses),
             Paint::Nothing
+        );
+        assert_eq!(losses[0].path, "renderer.symbol.url: abc.png");
+    }
+
+    #[test]
+    fn picture_marker_carries_the_data_uri() {
+        let mut losses = Vec::new();
+        let sym = json!({
+            "type": "esriPMS",
+            "url": "abc.png",
+            "imageData": "iVBOR",
+            "contentType": "image/png",
+            "width": 9,
+            "height": 18,
+            "angle": 30
+        });
+        assert_eq!(
+            parse(Some(&sym), "renderer.symbol", Geometry::Point, &mut losses),
+            Paint::PictureMarker(Picture {
+                image: TranslatedImage {
+                    data_uri: "data:image/png;base64,iVBOR".to_string(),
+                    width: 12.0,
+                    height: 24.0,
+                },
+                // esri rotates counter clockwise, mapbox clockwise
+                rotate: 330.0,
+            })
+        );
+        assert!(losses.is_empty());
+    }
+
+    #[test]
+    fn picture_size_falls_back_to_the_other_side() {
+        let mut losses = Vec::new();
+        let sym = json!({
+            "type": "esriPFS",
+            "imageData": "iVBOR",
+            "contentType": "image/png",
+            "height": 9,
+            "width": 0
+        });
+        assert_eq!(
+            parse(
+                Some(&sym),
+                "renderer.symbol",
+                Geometry::Polygon,
+                &mut losses
+            ),
+            Paint::PictureFill(TranslatedImage {
+                data_uri: "data:image/png;base64,iVBOR".to_string(),
+                width: 12.0,
+                height: 12.0,
+            })
+        );
+        assert_eq!(losses[0].path, "renderer.symbol.width/height");
+    }
+
+    #[test]
+    fn image_data_is_never_validated() {
+        let mut losses = Vec::new();
+        let sym = json!({
+            "type": "esriPMS",
+            "imageData": "not base64 at all",
+            "contentType": "text/plain",
+            "width": 9,
+            "height": 9
+        });
+        let paint = parse(Some(&sym), "renderer.symbol", Geometry::Point, &mut losses);
+        assert_eq!(
+            paint.picture_marker().unwrap().image.data_uri,
+            "data:text/plain;base64,not base64 at all"
+        );
+        assert!(losses.is_empty());
+    }
+
+    #[test]
+    fn image_data_without_a_content_type_is_refused() {
+        let mut losses = Vec::new();
+        let sym = json!({ "type": "esriPMS", "imageData": "iVBOR", "width": 9, "height": 9 });
+        assert_eq!(
+            parse(Some(&sym), "renderer.symbol", Geometry::Point, &mut losses),
+            Paint::Nothing
+        );
+        assert_eq!(losses[0].path, "renderer.symbol.contentType");
+    }
+
+    #[test]
+    fn picture_fill_reports_what_a_pattern_cannot_carry() {
+        let mut losses = Vec::new();
+        let sym = json!({
+            "type": "esriPFS",
+            "imageData": "iVBOR",
+            "contentType": "image/png",
+            "width": 9,
+            "height": 9,
+            "angle": 45,
+            "outline": { "type": "esriSLS", "style": "esriSLSSolid", "color": [0, 0, 0, 255], "width": 1 }
+        });
+        assert!(
+            parse(
+                Some(&sym),
+                "renderer.symbol",
+                Geometry::Polygon,
+                &mut losses
+            )
+            .picture_fill()
+            .is_some()
+        );
+        assert_eq!(
+            losses.iter().map(|l| l.path.as_str()).collect::<Vec<_>>(),
+            vec!["renderer.symbol.angle", "renderer.symbol.outline"]
+        );
+    }
+
+    #[test]
+    fn a_picture_marker_does_not_fit_a_polygon_layer() {
+        let mut losses = Vec::new();
+        let sym = json!({
+            "type": "esriPMS",
+            "imageData": "iVBOR",
+            "contentType": "image/png",
+            "width": 9,
+            "height": 9
+        });
+        assert!(
+            parse(
+                Some(&sym),
+                "renderer.symbol",
+                Geometry::Polygon,
+                &mut losses
+            )
+            .picture_marker()
+            .is_some()
         );
         assert_eq!(losses[0].path, "renderer.symbol.type: esriPMS");
     }

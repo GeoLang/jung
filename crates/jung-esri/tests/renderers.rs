@@ -209,16 +209,180 @@ fn null_line_style_emits_no_layer() {
 }
 
 #[test]
-fn picture_symbols_are_refused_by_name() {
+fn picture_marker_becomes_a_symbol_layer() {
+    let out = translate(&fixtures::picture_point(), &source(), Geometry::Point);
+    assert_eq!(out.losses, vec![]);
+    assert_eq!(
+        out.layers,
+        vec![json!({
+            "id": "wells-icon",
+            "type": "symbol",
+            "source": "ptolemy",
+            "source-layer": "wells",
+            "layout": {
+                "icon-image": "wells-image",
+                "icon-allow-overlap": true,
+                // esri turns 90 degrees counter clockwise, mapbox clockwise
+                "icon-rotate": 270.0
+            }
+        })]
+    );
+    assert_eq!(out.images.len(), 1);
+    let image = &out.images["wells-image"];
+    assert_eq!(
+        image.data_uri,
+        format!("data:image/png;base64,{}", fixtures::PNG)
+    );
+    // 18 points at 96 dpi, the size the consumer registers the bitmap at
+    assert_eq!((image.width, image.height), (24.0, 24.0));
+}
+
+#[test]
+fn images_serialize_under_their_names() {
+    let out = translate(&fixtures::picture_point(), &source(), Geometry::Point);
+    assert_eq!(
+        serde_json::to_value(&out.images).unwrap(),
+        json!({
+            "wells-image": {
+                "data_uri": format!("data:image/png;base64,{}", fixtures::PNG),
+                "width": 24.0,
+                "height": 24.0
+            }
+        })
+    );
+}
+
+#[test]
+fn mixed_picture_and_vector_branches_get_a_layer_each() {
+    let out = translate(
+        &fixtures::picture_unique_value_point(),
+        &source(),
+        Geometry::Point,
+    );
+    assert_eq!(out.losses, vec![]);
+    assert_eq!(out.layers.len(), 2);
+    // the circle layer paints the picture branch away
+    assert_eq!(
+        out.layers[0]["paint"],
+        json!({
+            "circle-color": ["match", ["to-string", ["get", "KIND"]],
+                "well", "rgba(0,0,0,0)",
+                "dry", "rgba(0,0,0,1)",
+                "rgba(120,120,120,1)"],
+            "circle-radius": ["match", ["to-string", ["get", "KIND"]],
+                "well", 0.0,
+                "dry", 6.0,
+                4.0]
+        })
+    );
+    // and the icon layer draws nothing for the vector branches
+    assert_eq!(
+        out.layers[1],
+        json!({
+            "id": "wells-icon",
+            "type": "symbol",
+            "source": "ptolemy",
+            "source-layer": "wells",
+            "layout": {
+                "icon-image": ["match", ["to-string", ["get", "KIND"]],
+                    "well", "wells-image-0",
+                    "dry", "",
+                    ""],
+                "icon-allow-overlap": true
+            }
+        })
+    );
+    assert_eq!(out.images.keys().collect::<Vec<_>>(), vec!["wells-image-0"]);
+    assert_eq!(out.images["wells-image-0"].width, 16.0);
+}
+
+#[test]
+fn picture_fill_becomes_a_fill_pattern() {
+    let out = translate(
+        &fixtures::picture_fill_polygon(),
+        &source(),
+        Geometry::Polygon,
+    );
+    assert_eq!(out.losses, vec![]);
+    assert_eq!(
+        out.layers,
+        vec![json!({
+            "id": "wells-pattern",
+            "type": "fill",
+            "source": "ptolemy",
+            "source-layer": "wells",
+            "paint": {
+                "fill-pattern": "wells-image",
+                "fill-opacity": 0.8
+            }
+        })]
+    );
+    assert_eq!(out.images["wells-image"].height, 32.0);
+}
+
+#[test]
+fn a_picture_symbol_with_only_a_url_is_a_loss() {
     let drawing_info = json!({
         "renderer": {
             "type": "simple",
-            "symbol": { "type": "esriPMS", "url": "3f.png", "imageData": "iVBOR", "contentType": "image/png", "width": 12, "height": 12 }
+            "symbol": { "type": "esriPMS", "url": "https://example.com/3f.png", "width": 12, "height": 12 }
         }
     });
     let out = translate(&drawing_info, &source(), Geometry::Point);
     assert!(out.layers.is_empty());
-    assert_eq!(out.losses[0].path, "renderer.symbol.type: esriPMS");
+    assert!(out.images.is_empty());
+    assert_eq!(
+        out.losses[0].path,
+        "renderer.symbol.url: https://example.com/3f.png"
+    );
+}
+
+#[test]
+fn malformed_image_data_reaches_the_consumer_verbatim() {
+    let drawing_info = json!({
+        "renderer": {
+            "type": "simple",
+            "symbol": { "type": "esriPMS", "imageData": "!!!not base64", "contentType": "image/png", "width": 6, "height": 6 }
+        }
+    });
+    let out = translate(&drawing_info, &source(), Geometry::Point);
+    assert_eq!(out.losses, vec![]);
+    assert_eq!(
+        out.images["wells-image"].data_uri,
+        "data:image/png;base64,!!!not base64"
+    );
+}
+
+#[test]
+fn class_breaks_step_over_image_names() {
+    let drawing_info = json!({
+        "renderer": {
+            "type": "classBreaks",
+            "field": "DEPTH",
+            "minValue": 0,
+            "classBreakInfos": [
+                { "classMinValue": 0, "symbol": { "type": "esriPMS", "imageData": fixtures::PNG, "contentType": "image/png", "width": 6, "height": 6 } },
+                { "classMinValue": 100, "symbol": { "type": "esriPMS", "imageData": fixtures::PNG, "contentType": "image/png", "width": 12, "height": 12 } }
+            ]
+        }
+    });
+    let out = translate(&drawing_info, &source(), Geometry::Point);
+    assert_eq!(out.losses, vec![]);
+    assert_eq!(
+        out.layers[0]["layout"]["icon-image"],
+        json!([
+            "step",
+            ["get", "DEPTH"],
+            "",
+            0.0,
+            "wells-image-0",
+            100.0,
+            "wells-image-1"
+        ])
+    );
+    // one image per class, each at its own registered size
+    assert_eq!(out.images["wells-image-0"].width, 8.0);
+    assert_eq!(out.images["wells-image-1"].width, 16.0);
 }
 
 #[test]

@@ -58,7 +58,7 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 ### Input Formats
 - **GeoJSON** — standard feature collections
 - **Mapbox Vector Tiles (MVT/PBF)** — zero-dependency protobuf decoder, geometry command parsing, zigzag coordinate decoding, attribute extraction
-- **Esri drawingInfo** (`jung-esri`), translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, and whatever cannot be reproduced (picture symbols, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) comes back in a structured loss list naming the esri value it gave up on
+- **Esri drawingInfo** (`jung-esri`), translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, esriPMS/esriPFS picture symbols that carry their image inline as base64, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, picture symbols also come back as named data uri images the consumer registers at the declared pixel size, and whatever cannot be reproduced (picture symbols that only name a url, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) comes back in a structured loss list naming the esri value it gave up on
 
 ### Expression Engine
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
@@ -134,9 +134,9 @@ jung-style/
 
 jung-esri/
 ├── convert.rs        — Esri colors, point to pixel sizes
-├── symbol.rs         — esriSMS/esriSLS/esriSFS symbols to paint properties
+├── symbol.rs         — esriSMS/esriSLS/esriSFS and esriPMS/esriPFS symbols to paint properties
 ├── label.rs          — labelingInfo to a symbol layer
-└── lib.rs            — Renderer translation, layer assembly, loss list
+└── lib.rs            — Renderer translation, layer assembly, image names, loss list
 ```
 
 ## Quick Start

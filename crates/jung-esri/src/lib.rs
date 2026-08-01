@@ -17,14 +17,17 @@
 //! ## Scope
 //!
 //! Renderers: `simple`, `uniqueValue` (match on the joined field values) and
-//! `classBreaks` (step over the class field). Symbols: `esriSMS`, `esriSLS` and
-//! `esriSFS`. Labels: the first `labelingInfo` class, with `labelExpression` in the
+//! `classBreaks` (step over the class field). Symbols: `esriSMS`, `esriSLS`, `esriSFS`,
+//! and `esriPMS`/`esriPFS` when they carry the image inline as `imageData` plus a
+//! `contentType`. Labels: the first `labelingInfo` class, with `labelExpression` in the
 //! plain `[field]` form. Everything else is refused by its esri name into
-//! [`Translation::losses`], nothing is guessed.
+//! [`Translation::losses`], nothing is guessed. A picture symbol that only names a `url`
+//! is one of those refusals, because this crate does no network.
 //!
 //! Known approximations, each recorded as a loss: non circle marker shapes become
-//! circles, hatch fills become solid fills, and per class dash patterns collapse to the
-//! first pattern because `line-dasharray` is not data driven.
+//! circles, hatch fills become solid fills, per class dash patterns collapse to the
+//! first pattern because `line-dasharray` is not data driven, and a picture fill drops its
+//! outline and its rotation because `fill-pattern` carries neither.
 //!
 //! ## Translation choices
 //!
@@ -40,8 +43,25 @@
 //! reported as a loss. An `esriSLSNull` line emits no layer at all and is reported.
 //!
 //! One layer is emitted per drawn kind, and its id is the source-layer (or the source
-//! name when there is none) plus that kind: `wells-circle`, `wells-line`, `wells-fill`,
-//! `wells-outline`, `wells-label`.
+//! name when there is none) plus that kind: `wells-circle`, `wells-icon`, `wells-line`,
+//! `wells-fill`, `wells-pattern`, `wells-outline`, `wells-label`.
+//!
+//! ## Images
+//!
+//! `esriPMS` becomes a symbol layer whose `icon-image` names an image in
+//! [`Translation::images`], `esriPFS` becomes a fill layer whose `fill-pattern` names one.
+//! Image names follow the layer ids: `wells-image` for a simple renderer, `wells-image-0`
+//! and `wells-image-default` for renderer branches.
+//!
+//! The consumer registers every image before the layers draw, scaled to the
+//! [`TranslatedImage`] width and height, and the layers draw at icon size 1. That is why
+//! no `icon-size` is emitted. `icon-allow-overlap` is true because esri markers draw on
+//! every feature instead of collision hiding.
+//!
+//! A renderer whose branches mix pictures and vector symbols emits one layer per kind, and
+//! each layer hides the branches belonging to the other: the circle or fill layer paints
+//! the picture branches transparent, at radius 0 for circles, and the picture layer gives
+//! the vector branches an empty image name, which mapbox draws as nothing.
 //!
 //! ## Example
 //!
@@ -74,7 +94,9 @@ mod label;
 mod symbol;
 
 use convert::{TRANSPARENT, loss, number, round2, text};
+use serde::Serialize;
 use serde_json::{Map, Value, json};
+use std::collections::BTreeMap;
 use symbol::Paint;
 
 /// The vector source the emitted layers reference.
@@ -105,8 +127,28 @@ pub enum Geometry {
     Polygon,
 }
 
+/// A bitmap a picture symbol carried inline, to be registered before the layers draw.
+///
+/// The consumer decodes `data_uri` and **must** register the bitmap scaled to `width` by
+/// `height` css pixels, for example resizing it on a canvas before MapLibre's
+/// `map.addImage`. The layers then draw it at icon size 1, which is why no `icon-size` is
+/// emitted.
+///
+/// `data_uri` is untrusted content copied straight out of the drawingInfo. This crate
+/// never decodes the base64 and never looks at the bytes, so decoding it safely is the
+/// consumer's job.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TranslatedImage {
+    /// `data:<contentType>;base64,<imageData>`, both taken verbatim from the symbol
+    pub data_uri: String,
+    /// css pixels, from the esri point size at 96 dpi
+    pub width: f64,
+    /// css pixels, from the esri point size at 96 dpi
+    pub height: f64,
+}
+
 /// Something in the drawingInfo that did not survive translation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Loss {
     /// where it sits in the drawingInfo, with the offending value after a colon,
     /// for example `renderer.symbol.style: esriSFSCross`
@@ -116,10 +158,12 @@ pub struct Loss {
 }
 
 /// Mapbox GL layers plus what could not be translated.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Translation {
     /// raw mapbox gl layer objects, in draw order
     pub layers: Vec<Value>,
+    /// images the layers name in `icon-image` and `fill-pattern`, keyed by that name
+    pub images: BTreeMap<String, TranslatedImage>,
     pub losses: Vec<Loss>,
 }
 
@@ -197,8 +241,11 @@ impl Branched {
 
     /// one paint property, as a literal when every branch agrees and an expression otherwise
     fn prop(&self, f: impl Fn(&Paint) -> Value) -> Value {
-        let fallback = f(&self.default);
-        let outs: Vec<Value> = self.paints.iter().map(&f).collect();
+        self.prop_of(self.paints.iter().map(&f).collect(), f(&self.default))
+    }
+
+    /// same, for outputs that cannot be derived from a single paint
+    fn prop_of(&self, outs: Vec<Value>, fallback: Value) -> Value {
         if outs.iter().all(|o| *o == fallback) {
             return fallback;
         }
@@ -495,6 +542,63 @@ fn class_breaks(renderer: &Value, geometry: Geometry, losses: &mut Vec<Loss>) ->
     })
 }
 
+/// the image each branch of a renderer draws, None where the branch draws no picture
+struct Names {
+    branches: Vec<Option<String>>,
+    default: Option<String>,
+}
+
+impl Names {
+    fn any(&self) -> bool {
+        self.default.is_some() || self.branches.iter().any(Option::is_some)
+    }
+
+    /// mapbox draws no image for an empty name, which is how the branches that paint a
+    /// vector symbol are hidden on a picture layer
+    fn value(name: &Option<String>) -> Value {
+        json!(name.as_deref().unwrap_or(""))
+    }
+}
+
+/// name and collect the images of one picture kind, ids built like the layer ids: the
+/// source-layer plus the branch the picture came from
+fn register_images<'a>(
+    branched: &'a Branched,
+    prefix: &str,
+    picture: impl Fn(&'a Paint) -> Option<&'a TranslatedImage>,
+    images: &mut BTreeMap<String, TranslatedImage>,
+) -> Names {
+    let mut register = |paint: &'a Paint, name: String| {
+        let image = picture(paint)?;
+        images.insert(name.clone(), image.clone());
+        Some(name)
+    };
+    // a simple renderer is one symbol, so its image needs no branch discriminator
+    let default_name = if branched.paints.is_empty() {
+        format!("{prefix}-image")
+    } else {
+        format!("{prefix}-image-default")
+    };
+    let branches = branched
+        .paints
+        .iter()
+        .enumerate()
+        .map(|(i, paint)| register(paint, format!("{prefix}-image-{i}")))
+        .collect();
+    Names {
+        branches,
+        default: register(&branched.default, default_name),
+    }
+}
+
+fn marker_image(paint: &Paint) -> Option<&TranslatedImage> {
+    Some(&paint.picture_marker()?.image)
+}
+
+fn fill_image(paint: &Paint) -> Option<&TranslatedImage> {
+    paint.picture_fill()
+}
+
 /// build the layers for one flattened renderer
 fn emit(
     branched: &Branched,
@@ -505,34 +609,51 @@ fn emit(
 ) {
     match geometry {
         Geometry::Point => {
-            if !branched.all().any(|p| p.marker().is_some()) {
-                return;
-            }
-            let mut layer = LayerBuilder::new(format!("{}-circle", src.prefix()), "circle", src);
-            layer.paint("circle-color", branched.prop(marker_color));
-            layer.paint("circle-radius", branched.prop(marker_radius));
-            if branched
-                .all()
-                .any(|p| p.marker().is_some_and(|m| m.stroke.is_some()))
-            {
-                layer.paint("circle-stroke-color", branched.prop(marker_stroke_color));
-                layer.paint("circle-stroke-width", branched.prop(marker_stroke_width));
+            let names = register_images(branched, src.prefix(), marker_image, &mut out.images);
+            if branched.all().any(|p| p.marker().is_some()) {
+                let mut layer =
+                    LayerBuilder::new(format!("{}-circle", src.prefix()), "circle", src);
+                layer.paint("circle-color", branched.prop(marker_color));
+                layer.paint("circle-radius", branched.prop(marker_radius));
                 if branched
                     .all()
-                    .any(|p| p.marker().is_some_and(|m| stroke_dash(&m.stroke).is_some()))
+                    .any(|p| p.marker().is_some_and(|m| m.stroke.is_some()))
                 {
-                    loss(
-                        &mut out.losses,
-                        "renderer.symbol.outline.style",
-                        "dashed marker outlines are not supported on circle layers",
-                    );
+                    layer.paint("circle-stroke-color", branched.prop(marker_stroke_color));
+                    layer.paint("circle-stroke-width", branched.prop(marker_stroke_width));
+                    if branched
+                        .all()
+                        .any(|p| p.marker().is_some_and(|m| stroke_dash(&m.stroke).is_some()))
+                    {
+                        loss(
+                            &mut out.losses,
+                            "renderer.symbol.outline.style",
+                            "dashed marker outlines are not supported on circle layers",
+                        );
+                    }
                 }
+                if let Some(o) = opacity {
+                    layer.paint("circle-opacity", json!(o));
+                    layer.paint("circle-stroke-opacity", json!(o));
+                }
+                out.layers.push(layer.build());
             }
-            if let Some(o) = opacity {
-                layer.paint("circle-opacity", json!(o));
-                layer.paint("circle-stroke-opacity", json!(o));
+            if names.any() {
+                let mut layer = LayerBuilder::new(format!("{}-icon", src.prefix()), "symbol", src);
+                layer.layout("icon-image", image_prop(branched, &names));
+                // esri markers draw on every feature, they are not collision hidden
+                layer.layout("icon-allow-overlap", json!(true));
+                if branched
+                    .all()
+                    .any(|p| p.picture_marker().is_some_and(|pic| pic.rotate != 0.0))
+                {
+                    layer.layout("icon-rotate", branched.prop(picture_rotate));
+                }
+                if let Some(o) = opacity {
+                    layer.paint("icon-opacity", json!(o));
+                }
+                out.layers.push(layer.build());
             }
-            out.layers.push(layer.build());
         }
         Geometry::Line => {
             if !branched.all().any(|p| p.line().is_some()) {
@@ -555,12 +676,21 @@ fn emit(
             out.layers.push(layer.build());
         }
         Geometry::Polygon => {
+            let names = register_images(branched, src.prefix(), fill_image, &mut out.images);
             if branched
                 .all()
                 .any(|p| p.fill().is_some_and(|f| f.color.is_some()))
             {
                 let mut layer = LayerBuilder::new(format!("{}-fill", src.prefix()), "fill", src);
                 layer.paint("fill-color", branched.prop(fill_color));
+                if let Some(o) = opacity {
+                    layer.paint("fill-opacity", json!(o));
+                }
+                out.layers.push(layer.build());
+            }
+            if names.any() {
+                let mut layer = LayerBuilder::new(format!("{}-pattern", src.prefix()), "fill", src);
+                layer.paint("fill-pattern", image_prop(branched, &names));
                 if let Some(o) = opacity {
                     layer.paint("fill-opacity", json!(o));
                 }
@@ -612,6 +742,18 @@ fn single_dash(
 
 fn stroke_dash(stroke: &Option<symbol::Stroke>) -> Option<&Vec<f64>> {
     stroke.as_ref()?.dash.as_ref()
+}
+
+/// icon-image or fill-pattern, a plain name when one image covers every branch
+fn image_prop(branched: &Branched, names: &Names) -> Value {
+    branched.prop_of(
+        names.branches.iter().map(Names::value).collect(),
+        Names::value(&names.default),
+    )
+}
+
+fn picture_rotate(paint: &Paint) -> Value {
+    json!(paint.picture_marker().map_or(0.0, |pic| pic.rotate))
 }
 
 fn marker_color(paint: &Paint) -> Value {

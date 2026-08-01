@@ -72,6 +72,16 @@ fn wrong_types_everywhere_never_panic() {
         json!({ "renderer": { "type": "simple", "symbol": null }, "labelingInfo": [{ "labelExpression": "[UNCLOSED", "symbol": 4 }] }),
         json!({ "renderer": { "type": "simple", "symbol": null }, "labelingInfo": [{ "labelExpression": "[A]", "symbol": { "type": "esriSFS" } }] }),
         json!({ "renderer": { "type": "simple", "symbol": null }, "labelingInfo": [{ "labelExpression": "[A]", "labelPlacement": "esriServerPointLabelPlacementNowhere" }] }),
+        json!({ "renderer": { "type": "simple", "symbol": { "type": "esriPMS" } } }),
+        json!({ "renderer": { "type": "simple", "symbol": { "type": "esriPFS", "url": "" } } }),
+        json!({ "renderer": { "type": "simple", "symbol": { "type": "esriPMS", "imageData": 7, "contentType": [], "width": "x", "height": null } } }),
+        json!({ "renderer": { "type": "simple", "symbol": { "type": "esriPMS", "imageData": "iVBOR", "contentType": "image/png" } } }),
+        json!({ "renderer": { "type": "simple", "symbol": { "type": "esriPMS", "imageData": "%%%", "contentType": "../../etc/passwd", "width": -3, "height": 1e308, "angle": "spin" } } }),
+        json!({ "renderer": { "type": "simple", "symbol": { "type": "esriPFS", "imageData": "iVBOR", "contentType": "image/png", "width": 8, "height": 8, "angle": 45, "outline": {} } } }),
+        json!({ "renderer": { "type": "uniqueValue", "field1": "A", "uniqueValueInfos": [
+            { "value": "a", "symbol": { "type": "esriPMS", "imageData": "iVBOR", "contentType": "image/png", "width": 0, "height": 0 } },
+            { "value": "b", "symbol": { "type": "esriPFS", "imageData": "iVBOR", "contentType": "image/png", "width": 8, "height": 8 } }
+        ] } }),
     ];
     for (geometry, name) in [
         (Geometry::Point, "point"),
@@ -85,6 +95,16 @@ fn wrong_types_everywhere_never_panic() {
                 assert!(
                     layer["id"].is_string(),
                     "{name} {case} emitted a layer without an id"
+                );
+            }
+            for (image_name, image) in &out.images {
+                assert!(
+                    image.data_uri.starts_with("data:"),
+                    "{name} {case} named {image_name} without a data uri"
+                );
+                assert!(
+                    image.width > 0.0 && image.height > 0.0,
+                    "{name} {case} registered {image_name} at a useless size"
                 );
             }
         }

@@ -8,6 +8,9 @@ pub fn source() -> Source {
     }
 }
 
+/// a real 1x1 png, the smallest thing a service can inline in a picture symbol
+pub const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+
 /// simple renderer with an esriSMS circle, the shape a hosted point layer publishes
 pub fn simple_point() -> Value {
     json!({
@@ -150,6 +153,81 @@ pub fn class_breaks_line() -> Value {
                 }
             ]
         }
+    })
+}
+
+/// simple renderer with an inline esriPMS, rotated
+pub fn picture_point() -> Value {
+    json!({
+        "renderer": {
+            "type": "simple",
+            "symbol": {
+                "type": "esriPMS",
+                "url": "5f2b1e.png",
+                "imageData": PNG,
+                "contentType": "image/png",
+                "width": 18,
+                "height": 18,
+                "angle": 90,
+                "xoffset": 0,
+                "yoffset": 0
+            }
+        }
+    })
+}
+
+/// uniqueValue mixing an inline esriPMS branch with an esriSMS branch and default
+pub fn picture_unique_value_point() -> Value {
+    json!({
+        "renderer": {
+            "type": "uniqueValue",
+            "field1": "KIND",
+            "defaultSymbol": {
+                "type": "esriSMS",
+                "style": "esriSMSCircle",
+                "color": [120, 120, 120, 255],
+                "size": 6
+            },
+            "uniqueValueInfos": [
+                {
+                    "value": "well",
+                    "symbol": {
+                        "type": "esriPMS",
+                        "imageData": PNG,
+                        "contentType": "image/png",
+                        "width": 12,
+                        "height": 12
+                    }
+                },
+                {
+                    "value": "dry",
+                    "symbol": {
+                        "type": "esriSMS",
+                        "style": "esriSMSCircle",
+                        "color": [0, 0, 0, 255],
+                        "size": 9
+                    }
+                }
+            ]
+        }
+    })
+}
+
+/// simple renderer with an inline esriPFS
+pub fn picture_fill_polygon() -> Value {
+    json!({
+        "renderer": {
+            "type": "simple",
+            "symbol": {
+                "type": "esriPFS",
+                "url": "9c4d.png",
+                "imageData": PNG,
+                "contentType": "image/png",
+                "width": 24,
+                "height": 24
+            }
+        },
+        "transparency": 20
     })
 }
 

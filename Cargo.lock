@@ -604,6 +604,7 @@ name = "jung-esri"
 version = "0.1.0"
 dependencies = [
  "jung-style",
+ "serde",
  "serde_json",
 ]
 
