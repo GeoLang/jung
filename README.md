@@ -380,7 +380,7 @@ Jung uses a Mapbox GL-compatible style format:
 # Build all crates
 cargo build --all
 
-# Run tests (293 tests)
+# Run tests (307 tests)
 cargo test --all
 
 # Clippy lint check
