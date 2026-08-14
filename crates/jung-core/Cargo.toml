@@ -8,6 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+jung-mvt = { workspace = true }
 jung-style = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

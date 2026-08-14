@@ -593,6 +593,7 @@ dependencies = [
 name = "jung-core"
 version = "0.1.0"
 dependencies = [
+ "jung-mvt",
  "jung-style",
  "serde",
  "thiserror",
@@ -606,6 +607,13 @@ dependencies = [
  "jung-style",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "jung-mvt"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]

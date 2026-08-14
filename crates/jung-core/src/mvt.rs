@@ -1,13 +1,14 @@
 //! Mapbox Vector Tile (MVT) decoding.
 //!
-//! Decodes Protocol Buffer-encoded vector tiles (.mvt/.pbf) into
-//! geospatial features that can be rendered by the core engine.
-//!
-//! Implements the [Mapbox Vector Tile spec v2](https://github.com/mapbox/vector-tile-spec).
+//! Decodes tiles with [`jung_mvt`] and normalises their tile units into the
+//! engine's coordinate space: 0 to 1 across the tile with y increasing
+//! northward.
 
-use crate::geometry::{Feature, Geometry, Point};
+use crate::geometry::{Feature, Geometry, Point, PolygonGeom};
+use jung_mvt::{AttributeValue, TileGeometry};
 use jung_style::PropertyValue;
-use std::collections::HashMap;
+
+pub use jung_mvt::Error as MvtError;
 
 /// A decoded vector tile.
 #[derive(Debug, Clone)]
@@ -23,477 +24,208 @@ pub struct TileLayer {
     pub features: Vec<Feature>,
 }
 
-/// MVT geometry command types.
-#[derive(Debug, Clone, Copy)]
-enum Command {
-    MoveTo,
-    LineTo,
-    ClosePath,
-}
-
 /// Decode a vector tile from raw protobuf bytes.
 pub fn decode_tile(data: &[u8]) -> Result<VectorTile, MvtError> {
-    let mut reader = PbfReader::new(data);
-    let mut layers = Vec::new();
-
-    while let Some((field, wire_type)) = reader.next_tag()? {
-        if field == 3 && wire_type == 2 {
-            // Tile.layers (repeated)
-            let layer_data = reader.read_bytes()?;
-            layers.push(decode_layer(layer_data)?);
-        } else {
-            reader.skip(wire_type)?;
-        }
-    }
-
-    Ok(VectorTile { layers })
+    let tile = jung_mvt::decode_tile(data)?;
+    Ok(VectorTile {
+        layers: tile.layers.into_iter().map(convert_layer).collect(),
+    })
 }
 
-fn decode_layer(data: &[u8]) -> Result<TileLayer, MvtError> {
-    let mut reader = PbfReader::new(data);
-    let mut name = String::new();
-    let mut extent = 4096u32;
-    let mut keys: Vec<String> = Vec::new();
-    let mut values: Vec<PropertyValue> = Vec::new();
-    let mut raw_features: Vec<RawFeature> = Vec::new();
-
-    while let Some((field, wire_type)) = reader.next_tag()? {
-        match field {
-            1 if wire_type == 2 => {
-                // name
-                name = reader.read_string()?;
-            }
-            2 if wire_type == 2 => {
-                // features
-                let feat_data = reader.read_bytes()?;
-                raw_features.push(decode_raw_feature(feat_data)?);
-            }
-            3 if wire_type == 2 => {
-                // keys
-                keys.push(reader.read_string()?);
-            }
-            4 if wire_type == 2 => {
-                // values
-                let val_data = reader.read_bytes()?;
-                values.push(decode_value(val_data)?);
-            }
-            5 if wire_type == 0 => {
-                // extent
-                extent = reader.read_varint()? as u32;
-            }
-            _ => {
-                reader.skip(wire_type)?;
-            }
-        }
-    }
-
-    // Convert raw features to Features
-    let features = raw_features
-        .into_iter()
-        .filter_map(|rf| {
-            let geometry = decode_geometry(rf.geom_type, &rf.geometry, extent)?;
-            let mut properties = HashMap::new();
-
-            for pair in rf.tags.chunks(2) {
-                if pair.len() == 2 {
-                    let key_idx = pair[0] as usize;
-                    let val_idx = pair[1] as usize;
-                    if key_idx < keys.len() && val_idx < values.len() {
-                        properties.insert(keys[key_idx].clone(), values[val_idx].clone());
-                    }
-                }
-            }
-
-            Some(Feature {
-                geometry,
-                properties,
-            })
-        })
-        .collect();
-
-    Ok(TileLayer {
+fn convert_layer(layer: jung_mvt::VectorLayer) -> TileLayer {
+    let jung_mvt::VectorLayer {
         name,
         extent,
         features,
-    })
+    } = layer;
+
+    let features = features
+        .into_iter()
+        .map(|feature| Feature {
+            geometry: convert_geometry(feature.geometry, extent),
+            properties: feature
+                .attributes
+                .into_iter()
+                .map(|(key, value)| (key, convert_value(value)))
+                .collect(),
+        })
+        .collect();
+
+    TileLayer {
+        name,
+        extent,
+        features,
+    }
 }
 
-#[derive(Debug)]
-struct RawFeature {
-    geom_type: u32,
-    geometry: Vec<u32>,
-    tags: Vec<u32>,
-}
-
-fn decode_raw_feature(data: &[u8]) -> Result<RawFeature, MvtError> {
-    let mut reader = PbfReader::new(data);
-    let mut geom_type = 0u32;
-    let mut geometry = Vec::new();
-    let mut tags = Vec::new();
-
-    while let Some((field, wire_type)) = reader.next_tag()? {
-        match field {
-            2 if wire_type == 2 => {
-                // tags (packed)
-                let tag_data = reader.read_bytes()?;
-                let mut tr = PbfReader::new(tag_data);
-                while tr.has_data() {
-                    tags.push(tr.read_varint()? as u32);
-                }
-            }
-            3 if wire_type == 0 => {
-                // type
-                geom_type = reader.read_varint()? as u32;
-            }
-            4 if wire_type == 2 => {
-                // geometry (packed)
-                let geom_data = reader.read_bytes()?;
-                let mut gr = PbfReader::new(geom_data);
-                while gr.has_data() {
-                    geometry.push(gr.read_varint()? as u32);
-                }
-            }
-            _ => {
-                reader.skip(wire_type)?;
+fn convert_geometry(geometry: TileGeometry, extent: u32) -> Geometry {
+    match geometry {
+        TileGeometry::Points(points) => {
+            let points = convert_ring(points, extent);
+            match points[..] {
+                [point] => Geometry::Point(point),
+                _ => Geometry::MultiPoint(points),
             }
         }
-    }
-
-    Ok(RawFeature {
-        geom_type,
-        geometry,
-        tags,
-    })
-}
-
-fn decode_value(data: &[u8]) -> Result<PropertyValue, MvtError> {
-    let mut reader = PbfReader::new(data);
-    while let Some((field, wire_type)) = reader.next_tag()? {
-        match field {
-            1 if wire_type == 2 => return Ok(PropertyValue::String(reader.read_string()?)),
-            2 if wire_type == 5 => {
-                let v = reader.read_f32()?;
-                return Ok(PropertyValue::Number(v as f64));
-            }
-            3 if wire_type == 1 => {
-                let v = reader.read_f64()?;
-                return Ok(PropertyValue::Number(v));
-            }
-            4 if wire_type == 0 => {
-                let v = reader.read_varint()?;
-                return Ok(PropertyValue::Integer(v));
-            }
-            5 if wire_type == 0 => {
-                return Ok(PropertyValue::Integer(reader.read_varint()?));
-            }
-            6 if wire_type == 0 => {
-                let v = reader.read_varint()?;
-                return Ok(PropertyValue::Integer(zigzag_decode(v as u32) as i64));
-            }
-            7 if wire_type == 0 => {
-                let v = reader.read_varint()?;
-                return Ok(PropertyValue::Boolean(v != 0));
-            }
-            _ => {
-                reader.skip(wire_type)?;
+        TileGeometry::Lines(lines) => {
+            let mut lines: Vec<Vec<Point>> = lines
+                .into_iter()
+                .map(|line| convert_ring(line, extent))
+                .collect();
+            match lines.len() {
+                1 => Geometry::LineString(lines.remove(0)),
+                _ => Geometry::MultiLineString(lines),
             }
         }
-    }
-    Ok(PropertyValue::Null)
-}
-
-fn decode_geometry(geom_type: u32, commands: &[u32], extent: u32) -> Option<Geometry> {
-    let mut cursor_x: i32 = 0;
-    let mut cursor_y: i32 = 0;
-    let mut rings: Vec<Vec<Point>> = Vec::new();
-    let mut current_ring: Vec<Point> = Vec::new();
-
-    let mut i = 0;
-    while i < commands.len() {
-        let cmd_int = commands[i];
-        let cmd_id = cmd_int & 0x7;
-        let count = cmd_int >> 3;
-        i += 1;
-
-        let cmd = match cmd_id {
-            1 => Command::MoveTo,
-            2 => Command::LineTo,
-            7 => Command::ClosePath,
-            _ => return None,
-        };
-
-        match cmd {
-            Command::MoveTo | Command::LineTo => {
-                for _ in 0..count {
-                    if i + 1 >= commands.len() {
-                        break;
-                    }
-                    let dx = zigzag_decode(commands[i]);
-                    let dy = zigzag_decode(commands[i + 1]);
-                    i += 2;
-                    cursor_x += dx;
-                    cursor_y += dy;
-
-                    let x = cursor_x as f64 / extent as f64;
-                    let y = 1.0 - cursor_y as f64 / extent as f64; // flip Y
-
-                    if matches!(cmd, Command::MoveTo) && !current_ring.is_empty() {
-                        rings.push(std::mem::take(&mut current_ring));
-                    }
-                    current_ring.push(Point { x, y });
-                }
-            }
-            Command::ClosePath => {
-                if let Some(first) = current_ring.first().cloned() {
-                    current_ring.push(first);
-                }
-                rings.push(std::mem::take(&mut current_ring));
-            }
-        }
-    }
-
-    if !current_ring.is_empty() {
-        rings.push(current_ring);
-    }
-
-    match geom_type {
-        1 => {
-            // Point
-            let all_points: Vec<Point> = rings.into_iter().flatten().collect();
-            if all_points.len() == 1 {
-                Some(Geometry::Point(all_points[0]))
-            } else if all_points.is_empty() {
-                None
-            } else {
-                Some(Geometry::MultiPoint(all_points))
-            }
-        }
-        2 => {
-            // LineString
-            if rings.len() == 1 {
-                Some(Geometry::LineString(rings.into_iter().next().unwrap()))
-            } else {
-                Some(Geometry::MultiLineString(rings))
-            }
-        }
-        3 => {
-            // Polygon
-            if rings.is_empty() {
-                None
-            } else {
-                let exterior = rings.remove(0);
-                Some(Geometry::Polygon {
-                    exterior,
-                    holes: rings,
+        TileGeometry::Polygons(polygons) => {
+            let mut polygons: Vec<PolygonGeom> = polygons
+                .into_iter()
+                .map(|polygon| PolygonGeom {
+                    exterior: convert_ring(polygon.exterior, extent),
+                    holes: polygon
+                        .holes
+                        .into_iter()
+                        .map(|hole| convert_ring(hole, extent))
+                        .collect(),
                 })
-            }
-        }
-        _ => None,
-    }
-}
-
-fn zigzag_decode(n: u32) -> i32 {
-    ((n >> 1) as i32) ^ -((n & 1) as i32)
-}
-
-/// MVT decode errors.
-#[derive(Debug, thiserror::Error)]
-pub enum MvtError {
-    #[error("unexpected end of data")]
-    UnexpectedEof,
-    #[error("invalid wire type: {0}")]
-    InvalidWireType(u8),
-    #[error("invalid UTF-8 string")]
-    InvalidUtf8,
-}
-
-/// Minimal protobuf reader.
-struct PbfReader<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> PbfReader<'a> {
-    fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-
-    fn has_data(&self) -> bool {
-        self.pos < self.data.len()
-    }
-
-    fn next_tag(&mut self) -> Result<Option<(u32, u8)>, MvtError> {
-        if self.pos >= self.data.len() {
-            return Ok(None);
-        }
-        let v = self.read_varint()? as u32;
-        let field = v >> 3;
-        let wire_type = (v & 0x7) as u8;
-        Ok(Some((field, wire_type)))
-    }
-
-    fn read_varint(&mut self) -> Result<i64, MvtError> {
-        let mut result: u64 = 0;
-        let mut shift = 0;
-        loop {
-            if self.pos >= self.data.len() {
-                return Err(MvtError::UnexpectedEof);
-            }
-            let byte = self.data[self.pos];
-            self.pos += 1;
-            result |= ((byte & 0x7F) as u64) << shift;
-            if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-            if shift >= 64 {
-                return Err(MvtError::UnexpectedEof);
-            }
-        }
-        Ok(result as i64)
-    }
-
-    fn read_bytes(&mut self) -> Result<&'a [u8], MvtError> {
-        let len = self.read_varint()? as usize;
-        if self.pos + len > self.data.len() {
-            return Err(MvtError::UnexpectedEof);
-        }
-        let slice = &self.data[self.pos..self.pos + len];
-        self.pos += len;
-        Ok(slice)
-    }
-
-    fn read_string(&mut self) -> Result<String, MvtError> {
-        let bytes = self.read_bytes()?;
-        String::from_utf8(bytes.to_vec()).map_err(|_| MvtError::InvalidUtf8)
-    }
-
-    fn read_f32(&mut self) -> Result<f32, MvtError> {
-        if self.pos + 4 > self.data.len() {
-            return Err(MvtError::UnexpectedEof);
-        }
-        let bytes: [u8; 4] = self.data[self.pos..self.pos + 4].try_into().unwrap();
-        self.pos += 4;
-        Ok(f32::from_le_bytes(bytes))
-    }
-
-    fn read_f64(&mut self) -> Result<f64, MvtError> {
-        if self.pos + 8 > self.data.len() {
-            return Err(MvtError::UnexpectedEof);
-        }
-        let bytes: [u8; 8] = self.data[self.pos..self.pos + 8].try_into().unwrap();
-        self.pos += 8;
-        Ok(f64::from_le_bytes(bytes))
-    }
-
-    fn skip(&mut self, wire_type: u8) -> Result<(), MvtError> {
-        match wire_type {
-            0 => {
-                self.read_varint()?;
-            }
-            1 => {
-                if self.pos + 8 > self.data.len() {
-                    return Err(MvtError::UnexpectedEof);
+                .collect();
+            match polygons.len() {
+                1 => {
+                    let PolygonGeom { exterior, holes } = polygons.remove(0);
+                    Geometry::Polygon { exterior, holes }
                 }
-                self.pos += 8;
+                _ => Geometry::MultiPolygon(polygons),
             }
-            2 => {
-                self.read_bytes()?;
-            }
-            5 => {
-                if self.pos + 4 > self.data.len() {
-                    return Err(MvtError::UnexpectedEof);
-                }
-                self.pos += 4;
-            }
-            _ => return Err(MvtError::InvalidWireType(wire_type)),
         }
-        Ok(())
+    }
+}
+
+fn convert_ring(ring: Vec<[f32; 2]>, extent: u32) -> Vec<Point> {
+    let extent = f64::from(extent);
+    ring.into_iter()
+        .map(|[x, y]| Point {
+            x: f64::from(x) / extent,
+            y: 1.0 - f64::from(y) / extent,
+        })
+        .collect()
+}
+
+fn convert_value(value: AttributeValue) -> PropertyValue {
+    match value {
+        AttributeValue::String(text) => PropertyValue::String(text),
+        AttributeValue::Number(number) => PropertyValue::Number(number),
+        AttributeValue::Integer(number) => PropertyValue::Integer(number),
+        AttributeValue::Boolean(flag) => PropertyValue::Boolean(flag),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jung_mvt::TilePolygon;
 
-    #[test]
-    fn zigzag_decode_values() {
-        assert_eq!(zigzag_decode(0), 0);
-        assert_eq!(zigzag_decode(1), -1);
-        assert_eq!(zigzag_decode(2), 1);
-        assert_eq!(zigzag_decode(3), -2);
-        assert_eq!(zigzag_decode(4), 2);
+    const EXTENT: u32 = 4096;
+
+    fn ring(points: &[(f32, f32)]) -> Vec<[f32; 2]> {
+        points.iter().map(|&(x, y)| [x, y]).collect()
     }
 
     #[test]
-    fn decode_empty_tile() {
-        let tile = decode_tile(&[]).unwrap();
-        assert!(tile.layers.is_empty());
+    fn point_is_normalised_with_y_flipped() {
+        let geometry = convert_geometry(TileGeometry::Points(ring(&[(1024.0, 1024.0)])), EXTENT);
+        assert_eq!(geometry, Geometry::Point(Point { x: 0.25, y: 0.75 }));
     }
 
     #[test]
-    fn decode_geometry_point() {
-        // MoveTo(1) + coords (10, 10) in MVT command encoding
-        // command_integer = (1 << 3) | 1 = 9
-        // zigzag(10) = 20, zigzag(10) = 20
-        let commands = vec![9, 20, 20];
-        let geom = decode_geometry(1, &commands, 4096).unwrap();
-        match geom {
-            Geometry::Point(p) => {
-                assert!((p.x - 10.0 / 4096.0).abs() < 0.001);
-            }
-            _ => panic!("expected Point"),
-        }
+    fn several_points_become_a_multipoint() {
+        let geometry = convert_geometry(
+            TileGeometry::Points(ring(&[(0.0, 0.0), (4096.0, 4096.0)])),
+            EXTENT,
+        );
+        assert_eq!(
+            geometry,
+            Geometry::MultiPoint(vec![Point { x: 0.0, y: 1.0 }, Point { x: 1.0, y: 0.0 },])
+        );
     }
 
     #[test]
-    fn decode_geometry_linestring() {
-        // MoveTo(1) x=0,y=0, LineTo(2) x=10,y=0 x=10,y=10
-        let commands = vec![
-            9, 0, 0, // MoveTo(1): (0,0)
-            18, 20, 0, // LineTo(2): dx=10,dy=0
-            0, 20, //            dx=0,dy=10
-        ];
-        let geom = decode_geometry(2, &commands, 4096).unwrap();
-        match geom {
-            Geometry::LineString(pts) => {
-                assert_eq!(pts.len(), 3);
-            }
-            _ => panic!("expected LineString"),
-        }
+    fn one_line_is_a_linestring_and_two_are_a_multilinestring() {
+        let line = ring(&[(0.0, 0.0), (2048.0, 0.0)]);
+        let single = convert_geometry(TileGeometry::Lines(vec![line.clone()]), EXTENT);
+        assert_eq!(
+            single,
+            Geometry::LineString(vec![Point { x: 0.0, y: 1.0 }, Point { x: 0.5, y: 1.0 },])
+        );
+
+        let pair = convert_geometry(TileGeometry::Lines(vec![line.clone(), line]), EXTENT);
+        assert!(matches!(pair, Geometry::MultiLineString(lines) if lines.len() == 2));
     }
 
     #[test]
-    fn decode_geometry_polygon() {
-        // Simple triangle: MoveTo, LineTo(3), ClosePath
-        let commands = vec![
-            9, 0, 0, // MoveTo: (0,0)
-            26, 20, 0, 0, 20, 21, 21, // LineTo(3): (+10,0),(0,+10),(-10,-10) zigzag
-            15, // ClosePath
-        ];
-        let geom = decode_geometry(3, &commands, 4096).unwrap();
-        match geom {
-            Geometry::Polygon { exterior, holes } => {
-                assert!(exterior.len() >= 4); // closed ring
-                assert!(holes.is_empty());
-            }
-            _ => panic!("expected Polygon"),
-        }
+    fn polygon_holes_are_normalised_too() {
+        let geometry = convert_geometry(
+            TileGeometry::Polygons(vec![TilePolygon {
+                exterior: ring(&[(0.0, 0.0), (4096.0, 0.0), (4096.0, 4096.0), (0.0, 0.0)]),
+                holes: vec![ring(&[
+                    (1024.0, 1024.0),
+                    (2048.0, 1024.0),
+                    (2048.0, 2048.0),
+                    (1024.0, 1024.0),
+                ])],
+            }]),
+            EXTENT,
+        );
+        let Geometry::Polygon { exterior, holes } = geometry else {
+            panic!("expected a polygon");
+        };
+        assert_eq!(exterior[0], Point { x: 0.0, y: 1.0 });
+        assert_eq!(holes.len(), 1);
+        assert_eq!(holes[0][0], Point { x: 0.25, y: 0.75 });
+    }
+
+    /// Two exterior rings are two polygons, not one polygon with a hole.
+    #[test]
+    fn two_polygons_become_a_multipolygon() {
+        let part = |offset: f32| TilePolygon {
+            exterior: ring(&[
+                (offset, offset),
+                (offset + 100.0, offset),
+                (offset + 100.0, offset + 100.0),
+                (offset, offset),
+            ]),
+            holes: Vec::new(),
+        };
+        let geometry = convert_geometry(
+            TileGeometry::Polygons(vec![part(0.0), part(1000.0)]),
+            EXTENT,
+        );
+        let Geometry::MultiPolygon(polygons) = geometry else {
+            panic!("expected a multipolygon");
+        };
+        assert_eq!(polygons.len(), 2);
+        assert!(polygons.iter().all(|polygon| polygon.holes.is_empty()));
     }
 
     #[test]
-    fn pbf_reader_varint() {
-        let data = [0x96, 0x01]; // varint for 150
-        let mut reader = PbfReader::new(&data);
-        assert_eq!(reader.read_varint().unwrap(), 150);
-    }
+    fn decode_minimal_tile() {
+        let tile = decode_tile(&build_test_tile()).unwrap();
+        assert_eq!(tile.layers.len(), 1);
+        assert_eq!(tile.layers[0].name, "test");
+        assert_eq!(tile.layers[0].extent, EXTENT);
+        assert_eq!(tile.layers[0].features.len(), 1);
 
-    #[test]
-    fn pbf_reader_string() {
-        // length-prefixed string "abc"
-        let data = [3, b'a', b'b', b'c'];
-        let mut reader = PbfReader::new(&data);
-        assert_eq!(reader.read_string().unwrap(), "abc");
+        let feature = &tile.layers[0].features[0];
+        assert_eq!(
+            feature.geometry,
+            Geometry::Point(Point {
+                x: 10.0 / 4096.0,
+                y: 1.0 - 10.0 / 4096.0,
+            })
+        );
+        assert_eq!(
+            feature.properties.get("name"),
+            Some(&PropertyValue::String("hello".to_string()))
+        );
     }
 
     /// Build a minimal valid MVT tile with one layer, one point feature.
@@ -564,27 +296,5 @@ mod tests {
             }
             buf.push(byte | 0x80);
         }
-    }
-
-    #[test]
-    fn decode_minimal_tile() {
-        let data = build_test_tile();
-        let tile = decode_tile(&data).unwrap();
-        assert_eq!(tile.layers.len(), 1);
-        assert_eq!(tile.layers[0].name, "test");
-        assert_eq!(tile.layers[0].extent, 4096);
-        assert_eq!(tile.layers[0].features.len(), 1);
-
-        let feature = &tile.layers[0].features[0];
-        match &feature.geometry {
-            Geometry::Point(p) => {
-                assert!((p.x - 10.0 / 4096.0).abs() < 0.001);
-            }
-            _ => panic!("expected Point"),
-        }
-        assert_eq!(
-            feature.properties.get("name"),
-            Some(&PropertyValue::String("hello".to_string()))
-        );
     }
 }

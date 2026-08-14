@@ -12,6 +12,7 @@ description = "Geospatial data visualization and map styling"
 
 [workspace.dependencies]
 jung-core = { path = "crates/jung-core" }
+jung-mvt = { path = "crates/jung-mvt" }
 jung-style = { path = "crates/jung-style" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

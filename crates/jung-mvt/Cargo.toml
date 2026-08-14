@@ -1,0 +1,11 @@
+[package]
+name = "jung-mvt"
+description = "Mapbox Vector Tile decoder producing tile-unit geometry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

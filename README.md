@@ -87,6 +87,7 @@ Jung transforms geospatial features + style definitions into rendered output (ra
 |-------|-------------|
 | `jung-core` | Core rendering engine: geometry, symbology, classification, OGC standards, output |
 | `jung-style` | Style specification parser (Mapbox GL JSON), expression engine, custom functions |
+| `jung-mvt` | Mapbox Vector Tile decoder, geometry in tile units |
 | `jung-esri` | Esri `drawingInfo` to Mapbox GL style translator, with a loss report |
 | `jung-vello` | GPU-accelerated rendering backend via Vello/wgpu |
 | `jung-wasm` | WebAssembly bindings for browser-side rendering |
@@ -106,7 +107,7 @@ jung-core/
 ├── label.rs          — Text placement with collision detection
 ├── text.rs           — TrueType/OTF font rasterization
 ├── curved_label.rs   — Text along line geometries
-├── mvt.rs            — Mapbox Vector Tile protobuf decoder
+├── mvt.rs            — jung-mvt tiles normalised into engine coordinates
 ├── classification.rs — Data classification and color ramps
 ├── clustering.rs     — Point clustering (grid, hierarchical, DBSCAN)
 ├── heatmap.rs        — Kernel density heatmap
@@ -126,6 +127,9 @@ jung-core/
 
 jung-vello/
 └── lib.rs            — Vello GPU scene builder, wgpu rendering
+
+jung-mvt/
+└── lib.rs            — Mapbox Vector Tile protobuf decoder
 
 jung-style/
 ├── expr.rs           — Expression AST, evaluation, StyleValue<T>
@@ -380,7 +384,7 @@ Jung uses a Mapbox GL-compatible style format:
 # Build all crates
 cargo build --all
 
-# Run tests (307 tests)
+# Run tests (323 tests)
 cargo test --all
 
 # Clippy lint check
