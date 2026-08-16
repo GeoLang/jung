@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- README no longer claims ViewTopia styles maps through jung-wasm. It names the
+  real callers (`jung-esri` in ptolemy, `jung-mvt` in terravista) and that
+  `Renderer` draws points, lines and polygons. Test count 323 → 322.
+
 ## [0.2.0] - 2026-08-13
 
 ### Added

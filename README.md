@@ -384,7 +384,7 @@ Jung uses a Mapbox GL-compatible style format:
 # Build all crates
 cargo build --all
 
-# Run tests (323 tests)
+# Run tests (322 tests)
 cargo test --all
 
 # Clippy lint check
@@ -397,13 +397,14 @@ wasm-pack build --target web
 
 ## Integration with GeoLang Ecosystem
 
-Jung is part of the GeoLang geospatial platform:
+Jung is a library, not a compose service.
 
-- **[GeoLang](https://github.com/GeoLang/tiletopia)** — 3D tile generation pipeline
-- **[ViewTopia](https://github.com/GeoLang/viewtopia)** — Geospatial viewer with agentic AI
-- **[Ptolemy](https://github.com/GeoLang/ptolemy)** — Versioned geospatial database
+- **[Ptolemy](https://github.com/GeoLang/ptolemy)** uses `jung-esri` to translate an ArcGIS `drawingInfo` into Mapbox GL style layers on `GET /style`.
+- **[TerraVista](https://github.com/GeoLang/terravista)** uses `jung-mvt` to decode vector tiles.
+- **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind an optional feature; the platform deploy does not enable it.
+- **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
-Jung provides the symbology engine that GeoLang uses for raster tile rendering and ViewTopia uses (via WASM) for client-side styling.
+`Renderer` draws points, lines and polygons from a Mapbox GL style. The other `jung-core` modules (labels, TTF, MIL-STD, heatmap, clustering, print layout, SLD, …) are library code with their own tests; nothing on the default render path calls them.
 
 ## License
 
