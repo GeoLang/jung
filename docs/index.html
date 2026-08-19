@@ -105,6 +105,32 @@
             font-size: 0.95rem;
         }
 
+        .note {
+            background: var(--surface);
+            border: 1px solid var(--primary);
+            border-left-width: 4px;
+            border-radius: 8px;
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .tag {
+            display: inline-block;
+            margin-left: 0.5rem;
+            padding: 0.1rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            vertical-align: middle;
+            background: var(--code-bg);
+            color: var(--primary-light);
+            border: 1px solid var(--primary);
+        }
+
         pre {
             background: var(--code-bg);
             border-radius: 8px;
@@ -187,6 +213,10 @@
     <div class="container">
         <section>
             <h2>Features</h2>
+            <div class="note">
+                <p><strong>What the renderer actually draws.</strong> <code>Renderer::render</code> covers points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization. Cards marked <span class="tag">library only</span> are modules with their own tests that nothing on the render path calls: you have to call them yourself.</p>
+                <p>There is no GeoJSON parser. The CLI and the WebAssembly build each read only <code>"Point"</code> geometries and give every feature empty properties, so they render an empty buffer for real data and every data-driven expression evaluates against nothing.</p>
+            </div>
             <div class="features">
                 <div class="feature-card">
                     <h3>GPU Accelerated</h3>
@@ -197,32 +227,32 @@
                     <p>Full expression language: data-driven styling, zoom interpolation, property-based filters. Drop-in style compatibility.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>OGC Standards</h3>
-                    <p>WKT/WKB serialization, Filter Encoding, Simple Features operations (envelope, area, length, centroid), SLD/SE 1.1 import and export.</p>
+                    <h3>OGC Standards <span class="tag">library only</span></h3>
+                    <p>WKT/WKB serialization, Simple Features operations (envelope, area, length, centroid), SLD/SE 1.1 import and export. Filter predicates are a Rust enum and evaluator, not OGC Filter Encoding, whose XML is neither read nor written. SLD import matches rules as the literal <code>&lt;se:Rule</code>, so another namespace prefix yields zero rules with no error, and it never parses filters, so imported rules match every feature.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Anti-Aliased Rendering</h3>
-                    <p>Xiaolin Wu line AA, distance-based thick lines, subpixel polygon coverage, smooth circle edges.</p>
+                    <h3>Anti-Aliasing <span class="tag">library only</span></h3>
+                    <p>Xiaolin Wu line AA, distance-based thick lines, polygon coverage, smooth circle edges. <code>antialias.rs</code> implements all of it and nothing calls it, the render path is hard-edged.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Advanced Symbology</h3>
-                    <p>MIL-STD-2525 military, S-52/S-57 maritime, topographic contours/hillshade, graduated/classified, heatmaps, clustering.</p>
+                    <h3>Advanced Symbology <span class="tag">library only</span></h3>
+                    <p>MIL-STD-2525 military, S-52/S-57 maritime, topographic contours/hillshade, graduated/classified, heatmaps, clustering. All of it exists as callable modules, none of it is reachable from <code>Renderer::render</code>. The MIL-STD symbols have no glyph set, every unit of one affiliation draws as the same empty frame.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Label Engine</h3>
-                    <p>TrueType font rendering, collision detection, curved text along lines, halo outlines, word wrap, anchor positioning.</p>
+                    <h3>Text Modules <span class="tag">library only</span></h3>
+                    <p>Three separate unwired modules, not one engine. <code>text.rs</code> rasterizes TrueType glyphs, <code>curved_label.rs</code> places text along lines, and <code>LabelEngine</code> does collision detection with a hardcoded 5x7 ASCII bitmap font that never touches the TrueType code. Nothing calls any of them, and the renderer draws no text.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Vector Tiles (MVT)</h3>
-                    <p>Zero-dependency protobuf decoder for Mapbox Vector Tiles. Geometry command parsing, zigzag decoding, attribute extraction.</p>
+                    <p>Protobuf decoder for Mapbox Vector Tiles with <code>thiserror</code> its only dependency. Geometry command parsing, zigzag decoding, attribute extraction.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Multiple Outputs</h3>
-                    <p>RGBA pixels, SVG vector export, high-DPI print (300/600 DPI), GPU scene graph, and WebAssembly for the browser.</p>
+                    <h3>Outputs</h3>
+                    <p>RGBA pixels and a Vello scene graph for your own wgpu renderer. <code>SvgDocument</code> is a builder you place elements into yourself, nothing converts a style plus features into SVG. <code>Renderer</code> takes no DPI or scale factor, so a 1px line stays 1px however large the buffer.</p>
                 </div>
                 <div class="feature-card">
                     <h3>GeoLang Ecosystem</h3>
-                    <p>Integrates with GeoLang for tile pipelines, ViewTopia for visualization, and Ptolemy for versioned geodata.</p>
+                    <p>Ptolemy uses <code>jung-esri</code> to translate an ArcGIS <code>drawingInfo</code> into Mapbox GL style layers. TerraVista uses <code>jung-mvt</code> to decode vector tiles. Fenestra can build a Vello scene behind an optional feature the platform deploy does not enable. ViewTopia does not import <code>jung-wasm</code>, its client styling is MapLibre and Cesium.</p>
                 </div>
             </div>
         </section>
