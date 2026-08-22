@@ -158,7 +158,7 @@ fn decode_layer(data: &[u8]) -> Result<VectorLayer, Error> {
         .filter_map(|raw| {
             let geometry = decode_geometry(raw.geom_type, &raw.geometry)?;
             let mut attributes = HashMap::new();
-            for pair in raw.tags.chunks_exact(2) {
+            for pair in raw.tags.as_chunks::<2>().0 {
                 let (Some(key), Some(Some(value))) =
                     (keys.get(pair[0] as usize), values.get(pair[1] as usize))
                 else {
