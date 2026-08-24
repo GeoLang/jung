@@ -287,12 +287,27 @@ let style = rules.evaluate(&context); // cascades matching rules
 ### WebAssembly
 
 ```javascript
-import init, { render_to_pixels } from 'jung-wasm';
+import init, { Renderer } from 'jung-wasm';
 
 await init();
 
-const pixels = render_to_pixels(
-    256, 256,
+const renderer = new Renderer(256, 256);
+
+// jung embeds no font, so text layers draw nothing until you add one. The
+// family name has to match what the layer's text-font asks for, and the first
+// family added is the fallback for any other name. Bad bytes throw.
+const font = await fetch('/fonts/DejaVuSans.ttf').then((r) => r.arrayBuffer());
+renderer.add_font('DejaVu Sans', new Uint8Array(font));
+
+const styleJson = JSON.stringify({
+    layers: [{
+        id: 'labels',
+        paint: { 'text-color': '#003366' },
+        layout: { 'text-field': 'Springfield', 'text-size': 20, 'text-font': ['DejaVu Sans'] },
+    }],
+});
+
+const pixels = renderer.render_to_pixels(
     styleJson,
     geojsonString,
     -180, -90, 180, 90
@@ -301,6 +316,10 @@ const pixels = render_to_pixels(
 const imageData = new ImageData(new Uint8ClampedArray(pixels), 256, 256);
 ctx.putImageData(imageData, 0, 0);
 ```
+
+One `Renderer` serves any number of renders, so load the font once and reuse it
+per tile. `text-field` has to be a literal string here: the wasm GeoJSON reader
+drops feature properties, so `{name}` tokens expand to nothing.
 
 ## Style Specification
 

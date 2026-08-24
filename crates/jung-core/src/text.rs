@@ -10,13 +10,14 @@ use jung_style::Color;
 use std::collections::HashMap;
 
 /// A loaded font face.
+#[derive(Clone)]
 pub struct FontFace {
     data: Vec<u8>,
 }
 
 /// The font faces available to a render, keyed by the family name a style's
 /// `text-font` asks for. Faces come from the caller: jung ships no font.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct FontSet {
     faces: HashMap<String, FontFace>,
     fallback_family: Option<String>,
