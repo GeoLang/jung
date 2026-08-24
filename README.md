@@ -56,7 +56,7 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 - **Mapbox Vector Tiles (MVT/PBF)** — protobuf decoder with `thiserror` its only dependency, geometry command parsing, zigzag coordinate decoding, attribute extraction
 - **Esri drawingInfo** (`jung-esri`), translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, esriPMS/esriPFS picture symbols that carry their image inline as base64, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, picture symbols also come back as named data uri images the consumer registers at the declared pixel size, and whatever cannot be reproduced (picture symbols that only name a url, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) comes back in a structured loss list naming the esri value it gave up on
 
-There is no GeoJSON parser in `jung-core`, and both front doors that accept GeoJSON are stubs. `jung-cli` and `jung-wasm` each read only `"Point"` geometries and set every feature's properties to an empty map. So the CLI renders an empty buffer for real-world data, and any data-driven expression evaluates against nothing, `{property}` label tokens included. Use the library API with `Feature` values you build yourself.
+There is no GeoJSON parser in `jung-core`, and both front doors that accept GeoJSON are partial. `jung-cli` and `jung-wasm` each read only `"Point"` geometries, so a file of lines or polygons renders an empty buffer. Point features do carry their properties, so `{property}` label tokens and data-driven expressions work, except for array and object members, which are dropped as nothing can read them. For any other geometry, use the library API with `Feature` values you build yourself.
 
 ### Expression Engine
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
@@ -303,7 +303,7 @@ const styleJson = JSON.stringify({
     layers: [{
         id: 'labels',
         paint: { 'text-color': '#003366' },
-        layout: { 'text-field': 'Springfield', 'text-size': 20, 'text-font': ['DejaVu Sans'] },
+        layout: { 'text-field': '{name}', 'text-size': 20, 'text-font': ['DejaVu Sans'] },
     }],
 });
 
@@ -318,8 +318,8 @@ ctx.putImageData(imageData, 0, 0);
 ```
 
 One `Renderer` serves any number of renders, so load the font once and reuse it
-per tile. `text-field` has to be a literal string here: the wasm GeoJSON reader
-drops feature properties, so `{name}` tokens expand to nothing.
+per tile. `{name}` reads the `name` member of each feature's `properties`, and a
+feature without it draws no label.
 
 ## Style Specification
 

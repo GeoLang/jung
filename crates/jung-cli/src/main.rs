@@ -2,7 +2,7 @@ use clap::Parser;
 use jung_core::geometry::{Feature, Geometry, Point};
 use jung_core::renderer::{BBox, Renderer};
 use jung_core::text::{FontFace, FontSet};
-use jung_style::parse_style;
+use jung_style::{parse_style, properties_from_json};
 use std::fs;
 use std::process;
 
@@ -209,7 +209,10 @@ fn parse_geojson_features(geojson: &str) -> Result<Vec<Feature>, String> {
                 if let Some(pt) = coords.and_then(parse_point) {
                     features.push(Feature {
                         geometry: Geometry::Point(pt),
-                        properties: std::collections::HashMap::new(),
+                        properties: feat_val
+                            .get("properties")
+                            .map(properties_from_json)
+                            .unwrap_or_default(),
                     });
                 }
             }
@@ -231,4 +234,109 @@ fn parse_point(coords: &serde_json::Value) -> Option<Point> {
         x: arr[0].as_f64()?,
         y: arr[1].as_f64()?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jung_style::PropertyValue;
+
+    /// One layer drawing nothing but green text, labelling each feature with
+    /// its own `name`.
+    const GREEN_TOKEN_STYLE: &str = r##"{"layers": [{
+        "id": "labels",
+        "paint": { "text-color": "#00ff00" },
+        "layout": { "text-field": "{name}", "text-size": 24.0, "text-font": ["Test Sans"] }
+    }]}"##;
+
+    const NAMED_CENTRE_POINT: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": { "type": "Point", "coordinates": [0.5, 0.5] },
+                "properties": { "name": "Springfield", "population": 30720 }
+            }
+        ]
+    }"#;
+
+    const UNNAMED_CENTRE_POINT: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": { "type": "Point", "coordinates": [0.5, 0.5] },
+                "properties": {}
+            }
+        ]
+    }"#;
+
+    const UNIT_BBOX: BBox = BBox {
+        min_x: 0.0,
+        min_y: 0.0,
+        max_x: 1.0,
+        max_y: 1.0,
+    };
+
+    /// jung embeds no font, so a test needing one reads the machine's and skips
+    /// when it finds none.
+    fn system_font() -> Option<FontFace> {
+        let paths = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+            "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "C:/Windows/Fonts/arial.ttf",
+        ];
+        paths
+            .iter()
+            .find_map(|path| fs::read(path).ok().and_then(FontFace::from_bytes))
+    }
+
+    fn green_pixel_count(geojson: &str, face: FontFace) -> usize {
+        let mut fonts = FontSet::new();
+        fonts.insert("Test Sans", face);
+        let renderer = Renderer::new(256, 256).unwrap().with_fonts(fonts);
+        let style = parse_style(GREEN_TOKEN_STYLE).unwrap();
+        let features = parse_geojson_features(geojson).unwrap();
+        let buffer = renderer.render(&style, &features, &UNIT_BBOX).unwrap();
+        buffer
+            .data
+            .chunks(4)
+            .filter(|px| px[1] == 255 && px[0] == 0 && px[3] > 0)
+            .count()
+    }
+
+    #[test]
+    fn properties_reach_the_features() {
+        let features = parse_geojson_features(NAMED_CENTRE_POINT).unwrap();
+        assert_eq!(features.len(), 1);
+        assert_eq!(
+            features[0].properties.get("name"),
+            Some(&PropertyValue::String("Springfield".into()))
+        );
+        assert_eq!(
+            features[0].properties.get("population"),
+            Some(&PropertyValue::Integer(30720))
+        );
+    }
+
+    #[test]
+    fn a_token_label_draws_from_the_feature_property() {
+        let Some(face) = system_font() else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        let named = green_pixel_count(NAMED_CENTRE_POINT, face.clone());
+        assert!(
+            named > 20,
+            "expected label pixels from the name property, got {named}"
+        );
+        assert_eq!(
+            green_pixel_count(UNNAMED_CENTRE_POINT, face),
+            0,
+            "a feature with no name property has nothing to label"
+        );
+    }
 }

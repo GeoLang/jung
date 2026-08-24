@@ -72,6 +72,21 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    /// Read one JSON member, as a GeoJSON `properties` object holds it. `None`
+    /// for arrays and objects, which no expression or `{token}` can use.
+    pub fn from_json(value: &Value) -> Option<Self> {
+        match value {
+            Value::String(s) => Some(PropertyValue::String(s.clone())),
+            Value::Number(n) => n
+                .as_i64()
+                .map(PropertyValue::Integer)
+                .or_else(|| n.as_f64().map(PropertyValue::Number)),
+            Value::Bool(b) => Some(PropertyValue::Boolean(*b)),
+            Value::Null => Some(PropertyValue::Null),
+            Value::Array(_) | Value::Object(_) => None,
+        }
+    }
+
     fn to_expr_value(&self) -> ExprValue {
         match self {
             PropertyValue::String(s) => ExprValue::String(s.clone()),
@@ -81,6 +96,19 @@ impl PropertyValue {
             PropertyValue::Null => ExprValue::Null,
         }
     }
+}
+
+/// Read a JSON object as a feature's properties, the way a GeoJSON
+/// `"properties"` member holds them. Members `PropertyValue::from_json` cannot
+/// represent are left out, and anything that is not an object gives an empty map.
+pub fn properties_from_json(object: &Value) -> HashMap<String, PropertyValue> {
+    let Some(members) = object.as_object() else {
+        return HashMap::new();
+    };
+    members
+        .iter()
+        .filter_map(|(key, value)| Some((key.clone(), PropertyValue::from_json(value)?)))
+        .collect()
 }
 
 /// A style value that is either a literal or a data-driven expression.
@@ -864,6 +892,28 @@ fn json_to_expr_value(value: &Value) -> Option<ExprValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_members_become_property_values() {
+        let object: Value = serde_json::from_str(
+            r#"{"name": "Springfield", "population": 30720, "area": 2.5,
+                "capital": false, "nickname": null,
+                "tags": ["a"], "nested": {"k": 1}}"#,
+        )
+        .unwrap();
+        let read = |key: &str| PropertyValue::from_json(&object[key]);
+
+        assert_eq!(
+            read("name"),
+            Some(PropertyValue::String("Springfield".into()))
+        );
+        assert_eq!(read("population"), Some(PropertyValue::Integer(30720)));
+        assert_eq!(read("area"), Some(PropertyValue::Number(2.5)));
+        assert_eq!(read("capital"), Some(PropertyValue::Boolean(false)));
+        assert_eq!(read("nickname"), Some(PropertyValue::Null));
+        assert_eq!(read("tags"), None);
+        assert_eq!(read("nested"), None);
+    }
 
     fn make_ctx(props: &[(&str, PropertyValue)], zoom: f64) -> EvalContext<'static> {
         let properties: HashMap<String, PropertyValue> = props

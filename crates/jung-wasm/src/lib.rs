@@ -6,7 +6,7 @@
 use jung_core::geometry::{Feature, Geometry, Point};
 use jung_core::renderer::{BBox, Renderer};
 use jung_core::text::{FontFace, FontSet};
-use jung_style::parse_style;
+use jung_style::{parse_style, properties_from_json};
 use wasm_bindgen::prelude::*;
 
 /// A reusable browser-side renderer at a fixed pixel size.
@@ -92,7 +92,9 @@ impl WasmRenderer {
     }
 }
 
-/// Minimal GeoJSON point parser (FeatureCollection with Point geometries).
+/// Minimal GeoJSON point parser (FeatureCollection with Point geometries),
+/// carrying each feature's properties so `{token}` labels and data-driven
+/// expressions have something to read.
 fn parse_geojson_points(geojson: &str) -> Result<Vec<Feature>, String> {
     let value: serde_json::Value =
         serde_json::from_str(geojson).map_err(|e| format!("JSON parse: {e}"))?;
@@ -129,7 +131,10 @@ fn parse_geojson_points(geojson: &str) -> Result<Vec<Feature>, String> {
 
         features.push(Feature {
             geometry: Geometry::Point(Point { x, y }),
-            properties: std::collections::HashMap::new(),
+            properties: feat_val
+                .get("properties")
+                .map(properties_from_json)
+                .unwrap_or_default(),
         });
     }
 
@@ -147,6 +152,13 @@ mod tests {
         "layout": { "text-field": "Springfield", "text-size": 24.0, "text-font": ["Test Sans"] }
     }]}"##;
 
+    /// The same layer, labelling each feature with its own `name`.
+    const GREEN_TOKEN_STYLE: &str = r##"{"layers": [{
+        "id": "labels",
+        "paint": { "text-color": "#00ff00" },
+        "layout": { "text-field": "{name}", "text-size": 24.0, "text-font": ["Test Sans"] }
+    }]}"##;
+
     const CENTRE_POINT: &str = r#"{
         "type": "FeatureCollection",
         "features": [
@@ -154,6 +166,17 @@ mod tests {
                 "type": "Feature",
                 "geometry": { "type": "Point", "coordinates": [0.5, 0.5] },
                 "properties": {}
+            }
+        ]
+    }"#;
+
+    const NAMED_CENTRE_POINT: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": { "type": "Point", "coordinates": [0.5, 0.5] },
+                "properties": { "name": "Springfield", "population": 30720 }
             }
         ]
     }"#;
@@ -228,6 +251,47 @@ mod tests {
             .render_pixels(GREEN_LABEL_STYLE, CENTRE_POINT, UNIT_BBOX)
             .unwrap();
         assert!(green_pixel_count(&pixels) > 20);
+    }
+
+    #[test]
+    fn a_token_label_draws_from_the_feature_property() {
+        let Some(font_bytes) = system_font_bytes() else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        let mut renderer = WasmRenderer::new(256, 256);
+        renderer.insert_font("Test Sans", &font_bytes).unwrap();
+
+        let named = renderer
+            .render_pixels(GREEN_TOKEN_STYLE, NAMED_CENTRE_POINT, UNIT_BBOX)
+            .unwrap();
+        assert!(
+            green_pixel_count(&named) > 20,
+            "expected label pixels from the name property, got {}",
+            green_pixel_count(&named)
+        );
+
+        let unnamed = renderer
+            .render_pixels(GREEN_TOKEN_STYLE, CENTRE_POINT, UNIT_BBOX)
+            .unwrap();
+        assert_eq!(
+            green_pixel_count(&unnamed),
+            0,
+            "a feature with no name property has nothing to label"
+        );
+    }
+
+    #[test]
+    fn properties_reach_the_features() {
+        let features = parse_geojson_points(NAMED_CENTRE_POINT).unwrap();
+        assert_eq!(
+            features[0].properties.get("name"),
+            Some(&jung_style::PropertyValue::String("Springfield".into()))
+        );
+        assert_eq!(
+            features[0].properties.get("population"),
+            Some(&jung_style::PropertyValue::Integer(30720))
+        );
     }
 
     #[test]
