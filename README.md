@@ -435,7 +435,7 @@ Jung is a library, not a compose service.
 - **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind an optional feature; the platform deploy does not enable it.
 - **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
-`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, the bitmap `LabelEngine` in `label.rs`, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, SLD) are library code with their own tests; nothing on the default render path calls them. SVG output and print furniture are gone.
+`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, SLD) are library code with their own tests; nothing on the default render path calls them. SVG output and print furniture are gone.
 
 ## License
 

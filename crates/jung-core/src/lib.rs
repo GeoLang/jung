@@ -13,7 +13,6 @@ pub mod clustering;
 pub mod extrusion;
 pub mod geometry;
 pub mod heatmap;
-pub mod label;
 pub mod layout;
 pub mod line;
 pub mod maritime;
