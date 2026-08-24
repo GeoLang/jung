@@ -48,8 +48,6 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 
 ### Output Formats
 - **Raster (RGBA pixels)** — direct pixel buffer output for tile generation
-- **SVG document builder** — `SvgDocument` emits circles, paths, polygons, text and groups with transforms and proper XML escaping. You place every element yourself, there is no conversion from a style plus features into SVG
-- **Print furniture** — scale bars, north arrows, graticule, title, legend. `print_layout.rs` draws the map frame itself as a grey placeholder rectangle with a caption
 - **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer
 
 `Renderer` takes no DPI or scale factor. You can allocate a larger pixel buffer, but nothing scales stroke widths or symbol sizes with it, so a 1px line is still 1px at 600 DPI.
@@ -85,7 +83,7 @@ There is no GeoJSON parser in `jung-core`, and both front doors that accept GeoJ
 
 | Crate | Description |
 |-------|-------------|
-| `jung-core` | Core rendering engine: geometry, symbology, classification, OGC standards, output |
+| `jung-core` | Core rendering engine: geometry, symbology, classification, OGC standards |
 | `jung-style` | Style specification parser (Mapbox GL JSON), expression engine, custom functions |
 | `jung-mvt` | Mapbox Vector Tile decoder, geometry in tile units |
 | `jung-esri` | Esri `drawingInfo` to Mapbox GL style translator, with a loss report |
@@ -124,10 +122,8 @@ jung-core/
 │                        vertices lies inside the tile, so a line crossing a
 │                        tile without a vertex in it is dropped)
 ├── label_priority.rs — Priority-ordered label placement with a deconfliction grid
-├── layout.rs         — Serde model of a page layout (elements, paper sizes).
-│                       No renderer, and print_layout.rs does not use it
-├── print_layout.rs   — Page furniture to SVG, map frame is a placeholder rect
-└── output.rs         — SVG export, print output, map furniture
+└── layout.rs         — Serde model of a page layout (elements, paper sizes).
+                        Nothing renders it
 
 jung-vello/
 └── lib.rs            — Vello GPU scene builder, wgpu rendering
@@ -223,18 +219,6 @@ let shade = compute_hillshade(&dem_data, width, height, cell_size, &HillshadePar
     z_factor: 2.0,
 });
 apply_hillshade(&mut buffer, &shade, 0.5);
-```
-
-### SVG Export
-
-```rust
-use jung_core::output::SvgDocument;
-
-let mut doc = SvgDocument::new(800.0, 600.0);
-doc.add_polyline(&line_points, &bbox, "#3388ff", 2.0);
-doc.add_polygon(&poly_points, &bbox, "rgba(51,136,255,0.3)", "#3388ff", 1.0);
-doc.add_text(10.0, 20.0, "Map Title", 16.0, "black");
-let svg_string = doc.to_svg();
 ```
 
 ### Custom Functions
@@ -412,7 +396,7 @@ Jung is a library, not a compose service.
 - **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind an optional feature; the platform deploy does not enable it.
 - **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
-`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization. The other `jung-core` modules (anti-aliasing, labels, TTF, curved labels, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, print layout, SLD) are library code with their own tests; nothing on the default render path calls them.
+`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization. The other `jung-core` modules (anti-aliasing, labels, TTF, curved labels, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, SLD) are library code with their own tests; nothing on the default render path calls them. SVG output and print furniture are gone.
 
 ## License
 

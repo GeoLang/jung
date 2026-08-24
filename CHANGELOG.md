@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- `jung-core`: `output` and `print_layout`. SVG export, print buffers and page
+  furniture are gone. Fenestra prints PDFs with printpdf and tiny-skia, and
+  ViewTopia prints client-side, so nothing consumed them.
+
 ### Changed
 
 - README no longer claims ViewTopia styles maps through jung-wasm. It names the
