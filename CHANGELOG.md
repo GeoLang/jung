@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `jung-wasm`: `render_to_pixels` is now a method on an exported `Renderer`
+  class, and `add_font(family, bytes)` feeds caller-supplied TTF/OTF into the
+  label pass, so browser renders carry labels. Unreadable font bytes throw.
+- `jung-style`: `PropertyValue::from_json` and `properties_from_json` read a
+  GeoJSON `properties` object. `jung-cli` and `jung-wasm` both use them, so
+  `{name}` tokens and data-driven expressions resolve against real feature
+  properties instead of an empty map. Arrays and objects are dropped.
+
 - `jung-core`: labels render on the default path. `Renderer::render` reads
   `text-field`, `text-size`, `text-font` and `text-color`, expands `{property}`
   tokens, deconflicts by priority derived from text size, places point labels
