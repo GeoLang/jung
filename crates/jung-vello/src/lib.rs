@@ -5,6 +5,9 @@
 //! Converts styled geospatial features into a `vello::Scene` which can be
 //! rendered at high performance via wgpu compute shaders.
 //!
+//! Point, line and polygon geometry only. A style's `text-*` properties are
+//! ignored here: labels draw on the CPU backend, `jung_core::renderer::Renderer`.
+//!
 //! # Usage
 //!
 //! ```ignore

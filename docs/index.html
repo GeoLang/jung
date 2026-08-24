@@ -214,7 +214,7 @@
         <section>
             <h2>Features</h2>
             <div class="note">
-                <p><strong>What the renderer actually draws.</strong> <code>Renderer::render</code> covers points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization. Cards marked <span class="tag">library only</span> are modules with their own tests that nothing on the render path calls: you have to call them yourself.</p>
+                <p><strong>What the renderer actually draws.</strong> <code>Renderer::render</code> covers points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the <code>text-*</code> properties once you hand it a font. Cards marked <span class="tag">library only</span> are modules with their own tests that nothing on the render path calls: you have to call them yourself.</p>
                 <p>There is no GeoJSON parser. The CLI and the WebAssembly build each read only <code>"Point"</code> geometries and give every feature empty properties, so they render an empty buffer for real data and every data-driven expression evaluates against nothing.</p>
             </div>
             <div class="features">
@@ -239,8 +239,8 @@
                     <p>MIL-STD-2525 military, S-52/S-57 maritime, topographic contours/hillshade, graduated/classified, heatmaps, clustering. All of it exists as callable modules, none of it is reachable from <code>Renderer::render</code>. The MIL-STD symbols have no glyph set, every unit of one affiliation draws as the same empty frame.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Text Modules <span class="tag">library only</span></h3>
-                    <p>Three separate unwired modules, not one engine. <code>text.rs</code> rasterizes TrueType glyphs, <code>curved_label.rs</code> places text along lines, and <code>LabelEngine</code> does collision detection with a hardcoded 5x7 ASCII bitmap font that never touches the TrueType code. Nothing calls any of them, and the renderer draws no text.</p>
+                    <h3>Labels</h3>
+                    <p><code>Renderer::render</code> draws a style's <code>text-field</code> once you give it a font with <code>with_fonts</code>: TrueType glyphs from <code>text.rs</code>, priority deconfliction from <code>label_priority.rs</code>, and text turned along line features by <code>curved_label.rs</code>. Point and line features label, polygons do not. Without a font nothing is drawn and <code>text_layers_without_font</code> names the layers skipped. The 5x7 bitmap <code>LabelEngine</code> in <code>label.rs</code> is still library only.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Vector Tiles (MVT)</h3>
@@ -248,7 +248,7 @@
                 </div>
                 <div class="feature-card">
                     <h3>Outputs</h3>
-                    <p>RGBA pixels and a Vello scene graph for your own wgpu renderer. <code>Renderer</code> takes no DPI or scale factor, so a 1px line stays 1px however large the buffer.</p>
+                    <p>RGBA pixels and a Vello scene graph for your own wgpu renderer, which carries geometry only and no labels. <code>Renderer</code> takes no DPI or scale factor, so a 1px line stays 1px however large the buffer.</p>
                 </div>
                 <div class="feature-card">
                     <h3>GeoLang Ecosystem</h3>

@@ -24,6 +24,9 @@ pub enum LabelPriority {
 /// A label candidate with position and priority.
 #[derive(Debug, Clone)]
 pub struct LabelCandidate {
+    /// Caller's identifier, copied onto the `PlacedLabel` so a placement can be
+    /// matched back to whatever asked for it.
+    pub id: usize,
     pub text: String,
     pub x: f64,
     pub y: f64,
@@ -115,6 +118,8 @@ impl CollisionGrid {
 /// Result of label placement.
 #[derive(Debug, Clone)]
 pub struct PlacedLabel {
+    /// The `id` of the candidate this came from.
+    pub id: usize,
     pub text: String,
     pub x: f64,
     pub y: f64,
@@ -166,6 +171,7 @@ impl PriorityLabelEngine {
                 };
                 grid.insert(bbox);
                 placed.push(PlacedLabel {
+                    id: candidate.id,
                     text: candidate.text.clone(),
                     x: position.0,
                     y: position.1,
@@ -227,8 +233,15 @@ impl PriorityLabelEngine {
 mod tests {
     use super::*;
 
-    fn make_candidate(text: &str, x: f64, y: f64, priority: LabelPriority) -> LabelCandidate {
+    fn make_candidate(
+        id: usize,
+        text: &str,
+        x: f64,
+        y: f64,
+        priority: LabelPriority,
+    ) -> LabelCandidate {
         LabelCandidate {
+            id,
             text: text.to_string(),
             x,
             y,
@@ -245,8 +258,8 @@ mod tests {
     fn test_no_collision() {
         let engine = PriorityLabelEngine::new(800.0, 600.0);
         let candidates = vec![
-            make_candidate("London", 100.0, 100.0, LabelPriority::High),
-            make_candidate("Paris", 400.0, 300.0, LabelPriority::High),
+            make_candidate(0, "London", 100.0, 100.0, LabelPriority::High),
+            make_candidate(1, "Paris", 400.0, 300.0, LabelPriority::High),
         ];
         let placed = engine.place(&candidates);
         assert_eq!(placed.len(), 2);
@@ -256,8 +269,8 @@ mod tests {
     fn test_priority_wins() {
         let engine = PriorityLabelEngine::new(800.0, 600.0);
         let candidates = vec![
-            make_candidate("Low", 100.0, 100.0, LabelPriority::Low),
-            make_candidate("Critical", 100.0, 100.0, LabelPriority::Critical),
+            make_candidate(0, "Low", 100.0, 100.0, LabelPriority::Low),
+            make_candidate(1, "Critical", 100.0, 100.0, LabelPriority::Critical),
         ];
         let placed = engine.place(&candidates);
         // Critical gets placed first at preferred position
@@ -273,8 +286,8 @@ mod tests {
         let engine = PriorityLabelEngine::new(800.0, 600.0);
         // Two labels at same position — second should be displaced
         let candidates = vec![
-            make_candidate("First", 200.0, 200.0, LabelPriority::High),
-            make_candidate("Second", 200.0, 200.0, LabelPriority::Medium),
+            make_candidate(7, "First", 200.0, 200.0, LabelPriority::High),
+            make_candidate(9, "Second", 200.0, 200.0, LabelPriority::Medium),
         ];
         let placed = engine.place(&candidates);
         assert_eq!(placed.len(), 2);
@@ -299,12 +312,31 @@ mod tests {
     #[test]
     fn test_out_of_bounds_rejection() {
         let engine = PriorityLabelEngine::new(100.0, 100.0);
-        let candidates = vec![make_candidate("Big Label", 90.0, 90.0, LabelPriority::High)];
+        let candidates = vec![make_candidate(
+            0,
+            "Big Label",
+            90.0,
+            90.0,
+            LabelPriority::High,
+        )];
         let placed = engine.place(&candidates);
         // Label is 60px wide, starts at x=90 in a 100px canvas → overflow
         // Should try alternate positions
         // At least it shouldn't crash
         assert!(placed.len() <= 1);
+    }
+
+    #[test]
+    fn placement_carries_the_candidate_id() {
+        let engine = PriorityLabelEngine::new(800.0, 600.0);
+        let candidates = vec![
+            make_candidate(4, "Later", 100.0, 100.0, LabelPriority::Low),
+            make_candidate(2, "Earlier", 400.0, 300.0, LabelPriority::Critical),
+        ];
+        let placed = engine.place(&candidates);
+        // sorted by priority, so the critical candidate comes back first
+        assert_eq!(placed[0].id, 2);
+        assert_eq!(placed[1].id, 4);
     }
 
     #[test]

@@ -1,15 +1,54 @@
 //! TrueType/OpenType font rendering.
 //!
 //! Parses TTF/OTF font files and rasterizes glyphs at arbitrary sizes
-//! with proper kerning and anti-aliasing. Provides a `FontAtlas` for
-//! efficient glyph caching.
+//! with proper kerning and anti-aliasing. A `FontSet` holds the faces a
+//! render can draw label text with, keyed by family name.
 
+use crate::curved_label::PlacedChar;
 use crate::renderer::PixelBuffer;
 use jung_style::Color;
+use std::collections::HashMap;
 
 /// A loaded font face.
 pub struct FontFace {
     data: Vec<u8>,
+}
+
+/// The font faces available to a render, keyed by the family name a style's
+/// `text-font` asks for. Faces come from the caller: jung ships no font.
+#[derive(Default)]
+pub struct FontSet {
+    faces: HashMap<String, FontFace>,
+    fallback_family: Option<String>,
+}
+
+impl FontSet {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a face under a family name. The first family added is the fallback.
+    pub fn insert(&mut self, family: impl Into<String>, face: FontFace) {
+        let family = family.into();
+        if self.fallback_family.is_none() {
+            self.fallback_family = Some(family.clone());
+        }
+        self.faces.insert(family, face);
+    }
+
+    /// The face for a family, or the fallback face when the family is unknown
+    /// or the style names none. `None` only when no face was added.
+    pub fn get(&self, family: Option<&str>) -> Option<&FontFace> {
+        family.and_then(|name| self.faces.get(name)).or_else(|| {
+            self.fallback_family
+                .as_deref()
+                .and_then(|name| self.faces.get(name))
+        })
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.faces.is_empty()
+    }
 }
 
 /// A rasterized glyph.
@@ -173,6 +212,52 @@ impl FontFace {
             }
         }
     }
+
+    /// Render one character where a curved label put it: centred on its point
+    /// and turned to its angle.
+    pub fn render_placed_char(
+        &self,
+        buffer: &mut PixelBuffer,
+        placed: &PlacedChar,
+        size_px: f64,
+        color: Color,
+    ) {
+        let Some(glyph) = self.rasterize_glyph(placed.ch, size_px) else {
+            return;
+        };
+        let (cx, cy) = (placed.x, placed.y);
+        let (sin_a, cos_a) = placed.angle.sin_cos();
+        let half_width = glyph.width as f64 / 2.0;
+        let half_height = glyph.height as f64 / 2.0;
+
+        // Walk the rotated bounding box and sample the glyph, so no destination
+        // pixel is skipped the way a forward rotation would skip it.
+        let extent = (half_width * cos_a.abs() + half_height * sin_a.abs())
+            .max(half_width * sin_a.abs() + half_height * cos_a.abs())
+            .ceil();
+        let x_start = (cx - extent).floor() as i32;
+        let x_end = (cx + extent).ceil() as i32;
+        let y_start = (cy - extent).floor() as i32;
+        let y_end = (cy + extent).ceil() as i32;
+
+        for py in y_start..=y_end {
+            for px in x_start..=x_end {
+                let dx = px as f64 - cx;
+                let dy = py as f64 - cy;
+                let local_x = dx * cos_a + dy * sin_a + half_width;
+                let local_y = -dx * sin_a + dy * cos_a + half_height;
+                if local_x < 0.0 || local_y < 0.0 {
+                    continue;
+                }
+                let (gx, gy) = (local_x as u32, local_y as u32);
+                if gx >= glyph.width || gy >= glyph.height {
+                    continue;
+                }
+                let coverage = glyph.coverage[(gy * glyph.width + gx) as usize];
+                blend_pixel(buffer, px, py, color, coverage);
+            }
+        }
+    }
 }
 
 /// Blit a rasterized glyph onto the buffer with alpha blending.
@@ -183,32 +268,35 @@ fn blit_glyph(buffer: &mut PixelBuffer, glyph: &RasterGlyph, pen_x: f64, pen_y: 
     for gy in 0..glyph.height {
         for gx in 0..glyph.width {
             let coverage = glyph.coverage[(gy * glyph.width + gx) as usize];
-            if coverage == 0 {
-                continue;
-            }
-
-            let px = base_x + gx as i32;
-            let py = base_y + gy as i32;
-
-            if px < 0 || py < 0 || px >= buffer.width as i32 || py >= buffer.height as i32 {
-                continue;
-            }
-
-            let idx = ((py as u32 * buffer.width + px as u32) * 4) as usize;
-            let alpha = (coverage as u32 * color.a as u32) / 255;
-
-            // Alpha-blend
-            let inv_a = 255 - alpha;
-            buffer.data[idx] =
-                ((color.r as u32 * alpha + buffer.data[idx] as u32 * inv_a) / 255) as u8;
-            buffer.data[idx + 1] =
-                ((color.g as u32 * alpha + buffer.data[idx + 1] as u32 * inv_a) / 255) as u8;
-            buffer.data[idx + 2] =
-                ((color.b as u32 * alpha + buffer.data[idx + 2] as u32 * inv_a) / 255) as u8;
-            buffer.data[idx + 3] =
-                (alpha + buffer.data[idx + 3] as u32 * inv_a / 255).min(255) as u8;
+            blend_pixel(
+                buffer,
+                base_x + gx as i32,
+                base_y + gy as i32,
+                color,
+                coverage,
+            );
         }
     }
+}
+
+/// Alpha-blend one coverage sample of `color` into the buffer.
+fn blend_pixel(buffer: &mut PixelBuffer, x: i32, y: i32, color: Color, coverage: u8) {
+    if x < 0 || y < 0 || x >= buffer.width as i32 || y >= buffer.height as i32 {
+        return;
+    }
+    let alpha = (coverage as u32 * color.a as u32) / 255;
+    if alpha == 0 {
+        return;
+    }
+
+    let idx = ((y as u32 * buffer.width + x as u32) * 4) as usize;
+    let inv_a = 255 - alpha;
+    buffer.data[idx] = ((color.r as u32 * alpha + buffer.data[idx] as u32 * inv_a) / 255) as u8;
+    buffer.data[idx + 1] =
+        ((color.g as u32 * alpha + buffer.data[idx + 1] as u32 * inv_a) / 255) as u8;
+    buffer.data[idx + 2] =
+        ((color.b as u32 * alpha + buffer.data[idx + 2] as u32 * inv_a) / 255) as u8;
+    buffer.data[idx + 3] = (alpha + buffer.data[idx + 3] as u32 * inv_a / 255).min(255) as u8;
 }
 
 /// Simple glyph rasterizer using scanline coverage.
@@ -376,30 +464,31 @@ impl ttf_parser::OutlineBuilder for GlyphRasterizer {
     }
 }
 
+/// A face from a system font path, for tests. jung embeds no font, so a test
+/// that needs one skips when the machine has none.
+#[cfg(test)]
+pub(crate) fn load_test_font() -> Option<FontFace> {
+    let paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation-sans-fonts/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:/Windows/Fonts/arial.ttf",
+    ];
+    for path in &paths {
+        if let Ok(data) = std::fs::read(path)
+            && let Some(face) = FontFace::from_bytes(data)
+        {
+            return Some(face);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // A minimal valid TTF font is hard to embed inline, so we test with
-    // the system-provided font or skip if not available.
-
-    fn load_test_font() -> Option<FontFace> {
-        // Try common system font paths
-        let paths = [
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
-            "/System/Library/Fonts/Helvetica.ttc",
-        ];
-        for path in &paths {
-            if let Ok(data) = std::fs::read(path)
-                && let Some(face) = FontFace::from_bytes(data)
-            {
-                return Some(face);
-            }
-        }
-        None
-    }
 
     #[test]
     fn load_system_font() {
@@ -445,6 +534,47 @@ mod tests {
         face.render_text(&mut buffer, "Test", 10.0, 30.0, 20.0, Color::rgb(0, 0, 0));
         let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
         assert!(filled > 20);
+    }
+
+    #[test]
+    fn empty_font_set_has_no_face() {
+        let fonts = FontSet::new();
+        assert!(fonts.is_empty());
+        assert!(fonts.get(None).is_none());
+        assert!(fonts.get(Some("DejaVu Sans")).is_none());
+    }
+
+    #[test]
+    fn font_set_falls_back_to_the_first_family() {
+        let Some(face) = load_test_font() else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        let mut fonts = FontSet::new();
+        fonts.insert("Test Sans", face);
+        assert!(fonts.get(Some("Test Sans")).is_some());
+        assert!(fonts.get(Some("Nothing Like It")).is_some());
+        assert!(fonts.get(None).is_some());
+    }
+
+    #[test]
+    fn rotated_char_fills_pixels_at_every_angle() {
+        let Some(face) = load_test_font() else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        for angle in [0.0, 0.5, 1.0, 2.5, -0.7] {
+            let mut buffer = PixelBuffer::new(64, 64);
+            let placed = PlacedChar {
+                ch: 'M',
+                x: 32.0,
+                y: 32.0,
+                angle,
+            };
+            face.render_placed_char(&mut buffer, &placed, 24.0, Color::rgb(0, 0, 0));
+            let filled = buffer.data.chunks(4).filter(|px| px[3] > 0).count();
+            assert!(filled > 20, "angle {angle} filled only {filled} pixels");
+        }
     }
 
     #[test]

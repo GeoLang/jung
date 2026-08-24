@@ -1,6 +1,7 @@
 use clap::Parser;
 use jung_core::geometry::{Feature, Geometry, Point};
 use jung_core::renderer::{BBox, Renderer};
+use jung_core::text::{FontFace, FontSet};
 use jung_style::parse_style;
 use std::fs;
 use std::process;
@@ -34,6 +35,14 @@ struct Cli {
     /// Bounding box: min_x,min_y,max_x,max_y
     #[arg(long)]
     bbox: Option<String>,
+
+    /// Path to a TTF/OTF font file, required for a style's text layers to draw
+    #[arg(long)]
+    font: Option<String>,
+
+    /// Family name the font answers to, matching the style's text-font
+    #[arg(long, default_value = "default")]
+    font_family: String,
 }
 
 fn main() {
@@ -71,10 +80,32 @@ fn main() {
         })
     };
 
-    let renderer = Renderer::new(cli.width, cli.height).unwrap_or_else(|e| {
+    let mut renderer = Renderer::new(cli.width, cli.height).unwrap_or_else(|e| {
         eprintln!("Renderer error: {e}");
         process::exit(1);
     });
+
+    if let Some(font_path) = &cli.font {
+        let data = fs::read(font_path).unwrap_or_else(|e| {
+            eprintln!("Error reading font '{font_path}': {e}");
+            process::exit(1);
+        });
+        let face = FontFace::from_bytes(data).unwrap_or_else(|| {
+            eprintln!("Error parsing font '{font_path}': not a TTF or OTF face");
+            process::exit(1);
+        });
+        let mut fonts = FontSet::new();
+        fonts.insert(&cli.font_family, face);
+        renderer = renderer.with_fonts(fonts);
+    }
+
+    let skipped = renderer.text_layers_without_font(&style);
+    if !skipped.is_empty() {
+        eprintln!(
+            "No font for text layers, labels skipped: {}. Pass --font",
+            skipped.join(", ")
+        );
+    }
 
     let buffer = renderer
         .render(&style, &features, &bbox)

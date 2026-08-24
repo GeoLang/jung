@@ -4,11 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `jung-core`: labels render on the default path. `Renderer::render` reads
+  `text-field`, `text-size`, `text-font` and `text-color`, expands `{property}`
+  tokens, deconflicts by priority derived from text size, places point labels
+  straight and line labels along the geometry, and rasterizes through the TTF
+  path. Fonts come from the caller via `Renderer::with_fonts`, and
+  `text_layers_without_font` names the layers skipped when none is given.
+  `Renderer::place_labels` returns the placements without drawing them.
+  Polygons do not label, and `jung-vello` still carries geometry only.
+- `jung-cli`: `--font` and `--font-family`, and a warning naming the text layers
+  skipped for want of a font.
+
 ### Removed
 
 - `jung-core`: `output` and `print_layout`. SVG export, print buffers and page
   furniture are gone. Fenestra prints PDFs with printpdf and tiny-skia, and
-  ViewTopia prints client-side, so nothing consumed them.
+  ViewTopia prints client-side, so nothing consumed them. Test count 322 → 316.
 
 ### Changed
 

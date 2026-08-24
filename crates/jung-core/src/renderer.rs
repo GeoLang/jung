@@ -1,9 +1,31 @@
+use crate::curved_label::{CurvedLabelParams, PlacedChar, place_curved_label, to_screen_coords};
 use crate::geometry::{Feature, Geometry, Point};
+use crate::label_priority::{LabelCandidate, LabelPriority, PriorityLabelEngine};
 use crate::line::{LineParams, render_line};
 use crate::marker::{IconPlacement, SpriteAtlas, blit_icon_placed};
 use crate::polygon::render_polygon;
-use jung_style::{Color, EvalContext, Layer, Style, StyleValue};
+use crate::text::{FontFace, FontSet};
+use jung_style::{Color, EvalContext, Layer, PropertyValue, Style, StyleValue};
+use std::collections::HashMap;
 use thiserror::Error;
+
+/// Mapbox's default `text-size`, used when a text layer names none.
+const DEFAULT_TEXT_SIZE_PX: f32 = 16.0;
+
+const DEFAULT_TEXT_COLOR: Color = Color::rgb(0, 0, 0);
+
+/// Type size is the only importance signal a Mapbox style carries, so bigger
+/// text outranks smaller text when two labels want the same pixels.
+const TEXT_SIZE_PRIORITIES: [(f64, LabelPriority); 4] = [
+    (24.0, LabelPriority::Critical),
+    (18.0, LabelPriority::High),
+    (14.0, LabelPriority::Medium),
+    (10.0, LabelPriority::Low),
+];
+
+/// How far deconfliction may move a label before a run fitted to a line counts
+/// as displaced.
+const MOVED_LABEL_TOLERANCE_PX: f64 = 0.5;
 
 /// Errors that can occur during rendering.
 #[derive(Debug, Error)]
@@ -53,10 +75,31 @@ impl PixelBuffer {
     }
 }
 
+/// Text a render placed, in canvas pixels.
+#[derive(Debug, Clone)]
+pub struct LabelPlacement {
+    pub text: String,
+    /// Family the layer's `text-font` named, if any.
+    pub font_family: Option<String>,
+    pub size: f64,
+    pub color: Color,
+    pub geometry: LabelGeometry,
+}
+
+/// Where a placed label sits.
+#[derive(Debug, Clone)]
+pub enum LabelGeometry {
+    /// Baseline origin of straight text.
+    Baseline { x: f64, y: f64 },
+    /// One entry per character, following a line feature.
+    AlongLine(Vec<PlacedChar>),
+}
+
 /// The main renderer. Takes a style and features, produces pixel output.
 pub struct Renderer {
     pub width: u32,
     pub height: u32,
+    fonts: FontSet,
 }
 
 impl Renderer {
@@ -64,10 +107,37 @@ impl Renderer {
         if width == 0 || height == 0 {
             return Err(RenderError::InvalidDimensions { width, height });
         }
-        Ok(Self { width, height })
+        Ok(Self {
+            width,
+            height,
+            fonts: FontSet::new(),
+        })
+    }
+
+    /// Give the renderer the faces label text is rasterized with. jung embeds no
+    /// font, so without this call a style's text layers draw nothing.
+    pub fn with_fonts(mut self, fonts: FontSet) -> Self {
+        self.fonts = fonts;
+        self
+    }
+
+    /// Ids of the style's text layers this renderer has no font for, so a caller
+    /// can report labels it is about to skip.
+    pub fn text_layers_without_font<'a>(&self, style: &'a Style) -> Vec<&'a str> {
+        style
+            .layers
+            .iter()
+            .filter(|layer| {
+                layer.text_field.is_some() && self.fonts.get(layer.font_family.as_deref()).is_none()
+            })
+            .map(|layer| layer.id.as_str())
+            .collect()
     }
 
     /// Render features according to the given style within the bounding box.
+    ///
+    /// Text layers draw only when the renderer has a font, see `with_fonts`, and
+    /// labels land over all geometry whatever order their layer sits in.
     pub fn render(
         &self,
         style: &Style,
@@ -97,6 +167,7 @@ impl Renderer {
                 self.render_feature_impl(&mut buffer, layer, feature, bbox, zoom, Some(sprites));
             }
         }
+        self.draw_labels(&mut buffer, &self.place_labels(style, features, bbox, zoom));
 
         Ok(buffer)
     }
@@ -120,8 +191,106 @@ impl Renderer {
                 self.render_feature_impl(&mut buffer, layer, feature, bbox, zoom, None);
             }
         }
+        self.draw_labels(&mut buffer, &self.place_labels(style, features, bbox, zoom));
 
         Ok(buffer)
+    }
+
+    /// Place every label the style's text layers ask for, deconflicted by
+    /// priority. Layers whose font is missing contribute nothing.
+    pub fn place_labels(
+        &self,
+        style: &Style,
+        features: &[Feature],
+        bbox: &BBox,
+        zoom: f64,
+    ) -> Vec<LabelPlacement> {
+        let mut collector = LabelCollector::default();
+
+        for layer in &style.layers {
+            let Some(text_field) = layer.text_field.as_ref() else {
+                continue;
+            };
+            let Some(font) = self.fonts.get(layer.font_family.as_deref()) else {
+                continue;
+            };
+
+            for feature in features {
+                let ctx = make_eval_context(feature, zoom);
+                let Some(template) = text_field.resolve(&ctx) else {
+                    continue;
+                };
+                let text = expand_property_tokens(&template, &feature.properties);
+                if text.is_empty() {
+                    continue;
+                }
+
+                let size =
+                    resolve_f32(&layer.font_size, &ctx).unwrap_or(DEFAULT_TEXT_SIZE_PX) as f64;
+                if size <= 0.0 {
+                    continue;
+                }
+                let text_style = TextStyle {
+                    font,
+                    family: layer.font_family.as_deref(),
+                    size,
+                    color: resolve_color(&layer.text_color, &ctx).unwrap_or(DEFAULT_TEXT_COLOR),
+                    priority: priority_for_text_size(size),
+                };
+
+                match &feature.geometry {
+                    Geometry::Point(pt) => {
+                        collector.push_point(self.to_screen(pt, bbox), &text, &text_style);
+                    }
+                    Geometry::MultiPoint(pts) => {
+                        for pt in pts {
+                            collector.push_point(self.to_screen(pt, bbox), &text, &text_style);
+                        }
+                    }
+                    Geometry::LineString(pts) => {
+                        let screen = to_screen_coords(pts, bbox, self.width, self.height);
+                        collector.push_line(&screen, &text, &text_style);
+                    }
+                    Geometry::MultiLineString(lines) => {
+                        for line in lines {
+                            let screen = to_screen_coords(line, bbox, self.width, self.height);
+                            collector.push_line(&screen, &text, &text_style);
+                        }
+                    }
+                    // labelling a polygon needs an interior point, which nothing here computes
+                    Geometry::Polygon { .. } | Geometry::MultiPolygon(_) => {}
+                }
+            }
+        }
+
+        collector.resolve(self.width as f64, self.height as f64)
+    }
+
+    fn draw_labels(&self, buffer: &mut PixelBuffer, placements: &[LabelPlacement]) {
+        for placement in placements {
+            let Some(font) = self.fonts.get(placement.font_family.as_deref()) else {
+                continue;
+            };
+            match &placement.geometry {
+                LabelGeometry::Baseline { x, y } => font.render_text(
+                    buffer,
+                    &placement.text,
+                    *x,
+                    *y,
+                    placement.size,
+                    placement.color,
+                ),
+                LabelGeometry::AlongLine(chars) => {
+                    for placed in chars {
+                        font.render_placed_char(buffer, placed, placement.size, placement.color);
+                    }
+                }
+            }
+        }
+    }
+
+    fn to_screen(&self, pt: &Point, bbox: &BBox) -> (f64, f64) {
+        (self.map_x(pt.x, bbox), self.map_y(pt.y, bbox))
     }
 
     fn render_feature_impl(
@@ -259,6 +428,210 @@ impl Renderer {
 
     fn map_y(&self, y: f64, bbox: &BBox) -> f64 {
         (bbox.max_y - y) / (bbox.max_y - bbox.min_y) * self.height as f64
+    }
+}
+
+/// The text properties one layer resolved to for one feature.
+struct TextStyle<'a> {
+    font: &'a FontFace,
+    family: Option<&'a str>,
+    size: f64,
+    color: Color,
+    priority: LabelPriority,
+}
+
+/// What a candidate needs to draw itself, held until deconfliction says whether
+/// it survived.
+struct PendingLabel {
+    text: String,
+    font_family: Option<String>,
+    size: f64,
+    color: Color,
+    shape: PendingShape,
+}
+
+enum PendingShape {
+    /// Baseline offset from the top of the candidate box.
+    Straight { ascent: f64 },
+    /// Characters already fitted to a line.
+    AlongLine {
+        chars: Vec<PlacedChar>,
+        requested_x: f64,
+        requested_y: f64,
+    },
+}
+
+/// Gathers the labels a style asks for, then hands them to the priority engine.
+#[derive(Default)]
+struct LabelCollector {
+    candidates: Vec<LabelCandidate>,
+    pending: Vec<Option<PendingLabel>>,
+}
+
+impl LabelCollector {
+    fn push_point(&mut self, screen: (f64, f64), text: &str, style: &TextStyle) {
+        let metrics = style.font.measure_text(text, style.size);
+        if metrics.width <= 0.0 {
+            return;
+        }
+        let (x, y) = screen;
+        self.push(
+            LabelCandidate {
+                id: self.pending.len(),
+                text: text.to_string(),
+                x: x - metrics.width / 2.0,
+                y: y - metrics.height / 2.0,
+                width: metrics.width,
+                height: metrics.height,
+                priority: style.priority,
+                rotation: 0.0,
+                anchor_x: x,
+                anchor_y: y,
+            },
+            style,
+            PendingShape::Straight {
+                ascent: metrics.ascent,
+            },
+        );
+    }
+
+    fn push_line(&mut self, screen_points: &[(f64, f64)], text: &str, style: &TextStyle) {
+        let char_widths: Vec<f64> = text
+            .chars()
+            .map(|ch| style.font.measure_text(&ch.to_string(), style.size).width)
+            .collect();
+        let params = CurvedLabelParams {
+            font_size: style.size,
+            color: style.color,
+            ..Default::default()
+        };
+        let Some(chars) = place_curved_label(screen_points, text, &char_widths, &params) else {
+            return;
+        };
+
+        // box the fitted run so the collision grid sees all of it
+        let half = style.size / 2.0;
+        let min_x = chars.iter().map(|c| c.x).fold(f64::INFINITY, f64::min) - half;
+        let max_x = chars.iter().map(|c| c.x).fold(f64::NEG_INFINITY, f64::max) + half;
+        let min_y = chars.iter().map(|c| c.y).fold(f64::INFINITY, f64::min) - half;
+        let max_y = chars.iter().map(|c| c.y).fold(f64::NEG_INFINITY, f64::max) + half;
+
+        self.push(
+            LabelCandidate {
+                id: self.pending.len(),
+                text: text.to_string(),
+                x: min_x,
+                y: min_y,
+                width: max_x - min_x,
+                height: max_y - min_y,
+                priority: style.priority,
+                rotation: chars.first().map_or(0.0, |c| c.angle),
+                anchor_x: min_x,
+                anchor_y: min_y,
+            },
+            style,
+            PendingShape::AlongLine {
+                chars,
+                requested_x: min_x,
+                requested_y: min_y,
+            },
+        );
+    }
+
+    fn push(&mut self, candidate: LabelCandidate, style: &TextStyle, shape: PendingShape) {
+        self.pending.push(Some(PendingLabel {
+            text: candidate.text.clone(),
+            font_family: style.family.map(str::to_string),
+            size: style.size,
+            color: style.color,
+            shape,
+        }));
+        self.candidates.push(candidate);
+    }
+
+    fn resolve(mut self, canvas_width: f64, canvas_height: f64) -> Vec<LabelPlacement> {
+        let placed = PriorityLabelEngine::new(canvas_width, canvas_height).place(&self.candidates);
+        let mut placements = Vec::with_capacity(placed.len());
+
+        for label in placed {
+            let Some(pending) = self.pending.get_mut(label.id).and_then(Option::take) else {
+                continue;
+            };
+            let geometry = match pending.shape {
+                PendingShape::Straight { ascent } => LabelGeometry::Baseline {
+                    x: label.x,
+                    y: label.y + ascent,
+                },
+                PendingShape::AlongLine {
+                    chars,
+                    requested_x,
+                    requested_y,
+                } => {
+                    // a run moved off its line says nothing about the line, so drop it
+                    if (label.x - requested_x).abs() > MOVED_LABEL_TOLERANCE_PX
+                        || (label.y - requested_y).abs() > MOVED_LABEL_TOLERANCE_PX
+                    {
+                        continue;
+                    }
+                    LabelGeometry::AlongLine(chars)
+                }
+            };
+            placements.push(LabelPlacement {
+                text: pending.text,
+                font_family: pending.font_family,
+                size: pending.size,
+                color: pending.color,
+                geometry,
+            });
+        }
+
+        placements
+    }
+}
+
+fn priority_for_text_size(size: f64) -> LabelPriority {
+    TEXT_SIZE_PRIORITIES
+        .iter()
+        .find(|(min_size, _)| size >= *min_size)
+        .map_or(LabelPriority::Optional, |(_, priority)| *priority)
+}
+
+/// Substitute `{property}` tokens in a `text-field` value. An unknown property
+/// leaves nothing behind, as in Mapbox GL.
+fn expand_property_tokens(template: &str, properties: &HashMap<String, PropertyValue>) -> String {
+    if !template.contains('{') {
+        return template.to_string();
+    }
+
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after_open = &rest[open + 1..];
+        match after_open.find('}') {
+            Some(close) => {
+                if let Some(value) = properties.get(&after_open[..close]) {
+                    out.push_str(&property_to_string(value));
+                }
+                rest = &after_open[close + 1..];
+            }
+            None => {
+                out.push_str(&rest[open..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn property_to_string(value: &PropertyValue) -> String {
+    match value {
+        PropertyValue::String(s) => s.clone(),
+        PropertyValue::Number(n) => n.to_string(),
+        PropertyValue::Integer(i) => i.to_string(),
+        PropertyValue::Boolean(b) => b.to_string(),
+        PropertyValue::Null => String::new(),
     }
 }
 
@@ -1004,5 +1377,236 @@ mod tests {
         let mut plain = PixelBuffer::new(64, 64);
         blit_icon_placed(&mut plain, &icon, 32.0, 32.0, &IconPlacement::default());
         assert_ne!(result.data, plain.data);
+    }
+
+    // ── labels ─────────────────────────────────────────────────────────────
+
+    const TEST_FAMILY: &str = "Test Sans";
+
+    fn unit_bbox() -> BBox {
+        BBox {
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: 1.0,
+            max_y: 1.0,
+        }
+    }
+
+    /// A renderer carrying a system font under `TEST_FAMILY`, or `None` on a
+    /// machine with no font to load.
+    fn labelling_renderer(width: u32, height: u32) -> Option<Renderer> {
+        let face = crate::text::load_test_font()?;
+        let mut fonts = FontSet::new();
+        fonts.insert(TEST_FAMILY, face);
+        Some(Renderer::new(width, height).unwrap().with_fonts(fonts))
+    }
+
+    fn named_point(name: &str, x: f64, y: f64) -> Feature {
+        let mut properties = HashMap::new();
+        properties.insert("name".to_string(), PropertyValue::String(name.to_string()));
+        Feature {
+            geometry: Geometry::Point(Point { x, y }),
+            properties,
+        }
+    }
+
+    #[test]
+    fn text_layer_draws_label_pixels_at_the_feature() {
+        let Some(renderer) = labelling_renderer(256, 256) else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        let style = jung_style::parse_style(
+            r##"{"layers": [{
+                "id": "labels",
+                "paint": { "text-color": "#00ff00" },
+                "layout": { "text-field": "{name}", "text-size": 20.0, "text-font": ["Test Sans"] }
+            }]}"##,
+        )
+        .unwrap();
+        let features = vec![named_point("Springfield", 0.5, 0.5)];
+
+        let placements = renderer.place_labels(&style, &features, &unit_bbox(), 0.0);
+        assert_eq!(placements.len(), 1);
+        assert_eq!(placements[0].text, "Springfield");
+        assert_eq!(placements[0].color, Color::rgb(0, 255, 0));
+        let LabelGeometry::Baseline { x, y } = placements[0].geometry else {
+            panic!("a point label places straight");
+        };
+        assert!(x < 128.0 && x > 20.0, "label starts left of the point: {x}");
+        assert!((y - 128.0).abs() < 20.0, "baseline near the point: {y}");
+
+        let result = renderer.render(&style, &features, &unit_bbox()).unwrap();
+        let green: Vec<(u32, u32)> = result
+            .data
+            .chunks(4)
+            .enumerate()
+            .filter(|(_, px)| px[1] == 255 && px[0] == 0 && px[3] > 0)
+            .map(|(i, _)| (i as u32 % 256, i as u32 / 256))
+            .collect();
+        assert!(
+            green.len() > 20,
+            "expected text pixels, got {}",
+            green.len()
+        );
+        assert!(
+            green
+                .iter()
+                .all(|(px, py)| (40..220).contains(px) && (100..160).contains(py)),
+            "text pixels should sit around the feature"
+        );
+    }
+
+    #[test]
+    fn bigger_text_wins_a_collision() {
+        // 200x40 leaves room for one large label at the centre and nowhere for a
+        // second one to move to
+        let Some(renderer) = labelling_renderer(200, 40) else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        let minor_layer = r##"{
+            "id": "minor",
+            "layout": { "text-field": "Bakersfield", "text-size": 18.0, "text-font": ["Test Sans"] }
+        }"##;
+        let major_layer = r##"{
+            "id": "major",
+            "layout": { "text-field": "Metropolis", "text-size": 24.0, "text-font": ["Test Sans"] }
+        }"##;
+        let features = vec![named_point("ignored", 0.5, 0.5)];
+
+        let alone = jung_style::parse_style(&format!(r#"{{"layers": [{minor_layer}]}}"#)).unwrap();
+        let placed_alone = renderer.place_labels(&alone, &features, &unit_bbox(), 0.0);
+        assert_eq!(
+            placed_alone.len(),
+            1,
+            "the smaller label fits when nothing competes"
+        );
+
+        let both =
+            jung_style::parse_style(&format!(r#"{{"layers": [{minor_layer}, {major_layer}]}}"#))
+                .unwrap();
+        let placements = renderer.place_labels(&both, &features, &unit_bbox(), 0.0);
+        let texts: Vec<&str> = placements.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(texts, vec!["Metropolis"]);
+    }
+
+    #[test]
+    fn line_feature_label_follows_the_line() {
+        let Some(renderer) = labelling_renderer(400, 400) else {
+            eprintln!("skipping: no system font");
+            return;
+        };
+        let style = jung_style::parse_style(
+            r##"{"layers": [{
+                "id": "rivers",
+                "layout": { "text-field": "{name}", "text-size": 16.0, "text-font": ["Test Sans"] }
+            }]}"##,
+        )
+        .unwrap();
+        let mut properties = HashMap::new();
+        properties.insert(
+            "name".to_string(),
+            PropertyValue::String("Rio Bravo".to_string()),
+        );
+        // screen-space diagonal from (40, 360) to (360, 40), so y = 400 - x
+        let features = vec![Feature {
+            geometry: Geometry::LineString(vec![
+                Point { x: 0.1, y: 0.1 },
+                Point { x: 0.9, y: 0.9 },
+            ]),
+            properties,
+        }];
+
+        let placements = renderer.place_labels(&style, &features, &unit_bbox(), 0.0);
+        assert_eq!(placements.len(), 1);
+        let LabelGeometry::AlongLine(chars) = &placements[0].geometry else {
+            panic!("a line label follows the geometry");
+        };
+        assert_eq!(chars.len(), "Rio Bravo".chars().count());
+        for placed in chars {
+            assert!(
+                (placed.y - (400.0 - placed.x)).abs() < 2.0,
+                "character {} off the line at ({}, {})",
+                placed.ch,
+                placed.x,
+                placed.y
+            );
+            assert!(
+                (placed.angle + std::f64::consts::FRAC_PI_4).abs() < 0.05,
+                "character {} not turned with the line: {}",
+                placed.ch,
+                placed.angle
+            );
+        }
+    }
+
+    #[test]
+    fn text_layer_without_a_font_renders_no_labels() {
+        let renderer = Renderer::new(128, 128).unwrap();
+        let with_text = jung_style::parse_style(
+            r##"{"layers": [{
+                "id": "labels",
+                "paint": { "circle-color": "#0000ff", "circle-radius": 3.0, "text-color": "#00ff00" },
+                "layout": { "text-field": "{name}", "text-size": 20.0 }
+            }]}"##,
+        )
+        .unwrap();
+        let without_text = jung_style::parse_style(
+            r##"{"layers": [{
+                "id": "labels",
+                "paint": { "circle-color": "#0000ff", "circle-radius": 3.0 }
+            }]}"##,
+        )
+        .unwrap();
+        let features = vec![named_point("Springfield", 0.5, 0.5)];
+
+        assert_eq!(
+            renderer.text_layers_without_font(&with_text),
+            vec!["labels"]
+        );
+        assert!(
+            renderer
+                .place_labels(&with_text, &features, &unit_bbox(), 0.0)
+                .is_empty()
+        );
+
+        let labelled = renderer
+            .render(&with_text, &features, &unit_bbox())
+            .unwrap();
+        let plain = renderer
+            .render(&without_text, &features, &unit_bbox())
+            .unwrap();
+        assert_eq!(labelled.data, plain.data, "no font, so no label pixels");
+    }
+
+    #[test]
+    fn label_text_expands_property_tokens() {
+        let mut properties = HashMap::new();
+        properties.insert(
+            "name".to_string(),
+            PropertyValue::String("Oslo".to_string()),
+        );
+        properties.insert("population".to_string(), PropertyValue::Integer(709_037));
+
+        assert_eq!(
+            expand_property_tokens("{name} ({population})", &properties),
+            "Oslo (709037)"
+        );
+        assert_eq!(expand_property_tokens("{missing}", &properties), "");
+        assert_eq!(expand_property_tokens("plain", &properties), "plain");
+        assert_eq!(
+            expand_property_tokens("{unclosed", &properties),
+            "{unclosed"
+        );
+    }
+
+    #[test]
+    fn text_size_sets_label_priority() {
+        assert_eq!(priority_for_text_size(30.0), LabelPriority::Critical);
+        assert_eq!(priority_for_text_size(18.0), LabelPriority::High);
+        assert_eq!(priority_for_text_size(16.0), LabelPriority::Medium);
+        assert_eq!(priority_for_text_size(10.0), LabelPriority::Low);
+        assert_eq!(priority_for_text_size(6.0), LabelPriority::Optional);
     }
 }

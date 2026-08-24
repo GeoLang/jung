@@ -16,9 +16,9 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 - **Zoom-Dependent Styling** — interpolated stops for smooth transitions across zoom levels
 - **Icon/Marker Rendering** — sprite atlases, built-in shapes (circle, square, diamond, star, triangle), alpha-composited blitting
 - **Symbol Library** — 16 built-in vector symbols (pin, flag, airport, hospital, fuel, parking, tree, mountain, shields, hazards) rendered at any resolution
-- **Label Engine** — bitmap text, word wrap, collision detection/decluttering, anchor positioning, halo/buffer rendering
-- **TrueType Font Rendering** — TTF/OTF parsing via ttf-parser, glyph rasterization at arbitrary sizes, kerning, grayscale coverage anti-aliasing
-- **Curved Labels** — text placed along line geometries, per-character rotation, max angle rejection, halo outlines, repeat spacing
+- **Labels** — `Renderer::render` draws a style's `text-field` on point and line features: TTF glyphs, priority deconfliction, text along lines. You supply the font, jung embeds none
+- **TrueType Font Rendering** — TTF/OTF parsing via ttf-parser, glyph rasterization at arbitrary sizes, kerning, grayscale coverage anti-aliasing, rotated glyphs
+- **Curved Labels** — text placed along line geometries, per-character rotation, max angle rejection, repeat spacing
 
 ### Advanced Symbology
 - **Graduated/Classified** — equal interval, quantile, natural breaks (Fisher-Jenks), standard deviation, manual classification with color ramps
@@ -48,7 +48,7 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 
 ### Output Formats
 - **Raster (RGBA pixels)** — direct pixel buffer output for tile generation
-- **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer
+- **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer, geometry only, no labels
 
 `Renderer` takes no DPI or scale factor. You can allocate a larger pixel buffer, but nothing scales stroke widths or symbol sizes with it, so a 1px line is still 1px at 600 DPI.
 
@@ -56,7 +56,7 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 - **Mapbox Vector Tiles (MVT/PBF)** — protobuf decoder with `thiserror` its only dependency, geometry command parsing, zigzag coordinate decoding, attribute extraction
 - **Esri drawingInfo** (`jung-esri`), translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, esriPMS/esriPFS picture symbols that carry their image inline as base64, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, picture symbols also come back as named data uri images the consumer registers at the declared pixel size, and whatever cannot be reproduced (picture symbols that only name a url, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) comes back in a structured loss list naming the esri value it gave up on
 
-There is no GeoJSON parser in `jung-core`, and both front doors that accept GeoJSON are stubs. `jung-cli` and `jung-wasm` each read only `"Point"` geometries and set every feature's properties to an empty map. So the CLI renders an empty buffer for real-world data, and any data-driven expression evaluates against nothing. Use the library API with `Feature` values you build yourself.
+There is no GeoJSON parser in `jung-core`, and both front doors that accept GeoJSON are stubs. `jung-cli` and `jung-wasm` each read only `"Point"` geometries and set every feature's properties to an empty map. So the CLI renders an empty buffer for real-world data, and any data-driven expression evaluates against nothing, `{property}` label tokens included. Use the library API with `Feature` values you build yourself.
 
 ### Expression Engine
 - **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
@@ -83,7 +83,7 @@ There is no GeoJSON parser in `jung-core`, and both front doors that accept GeoJ
 
 | Crate | Description |
 |-------|-------------|
-| `jung-core` | Core rendering engine: geometry, symbology, classification, OGC standards |
+| `jung-core` | Core rendering engine: geometry, symbology, labels, classification, OGC standards |
 | `jung-style` | Style specification parser (Mapbox GL JSON), expression engine, custom functions |
 | `jung-mvt` | Mapbox Vector Tile decoder, geometry in tile units |
 | `jung-esri` | Esri `drawingInfo` to Mapbox GL style translator, with a loss report |
@@ -153,6 +153,10 @@ jung --style style.json --input data.geojson --output tile.rgba --width 256 --he
 
 # Specify a custom bounding box
 jung --style style.json --input data.geojson --output tile.rgba --bbox "-180,-90,180,90"
+
+# Draw the style's text layers with a font, named so text-font can pick it
+jung --style style.json --input data.geojson --output tile.rgba \
+  --font /usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf --font-family "DejaVu Sans"
 ```
 
 ### Library Usage
@@ -219,6 +223,21 @@ let shade = compute_hillshade(&dem_data, width, height, cell_size, &HillshadePar
     z_factor: 2.0,
 });
 apply_hillshade(&mut buffer, &shade, 0.5);
+```
+
+### Labels
+
+```rust
+use jung_core::renderer::Renderer;
+use jung_core::text::{FontFace, FontSet};
+
+let face = FontFace::from_bytes(std::fs::read("DejaVuSans.ttf").unwrap()).unwrap();
+let mut fonts = FontSet::new();
+fonts.insert("DejaVu Sans", face);
+
+// text-field, text-size, text-font and text-color now draw
+let renderer = Renderer::new(512, 512).unwrap().with_fonts(fonts);
+let pixels = renderer.render(&style, &features, &bbox).unwrap();
 ```
 
 ### Custom Functions
@@ -343,11 +362,12 @@ The Block column is the style-layer object the property deserializes from. A pro
 | `icon-rotate` | layout | number | ✓ | Icon rotation, degrees clockwise |
 | `icon-anchor` | layout | enum | | `center`, `left`, `right`, `top`, `bottom`, `top-left`, `top-right`, `bottom-left`, `bottom-right` |
 | `icon-offset` | layout | number[2] | | Extra [x, y] pixel shift after the anchor |
-| `text-color` | paint | color | | Parsed, not implemented: the renderer never reads it |
-| `text-field` | layout | string | | Parsed, not implemented: the renderer never reads it |
-| `text-size` | layout | number | | Parsed, not implemented: the renderer never reads it |
+| `text-color` | paint | color | ✓ | Label color, black by default |
+| `text-field` | layout | string | ✓ | Label text, with `{property}` tokens |
+| `text-size` | layout | number | ✓ | Label size in pixels, 16 by default |
+| `text-font` | layout | string[] | | First entry picks a family from the renderer's `FontSet` |
 
-No branch of the renderer draws text, so the three `text-*` properties have no effect.
+Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one, text layers draw nothing and `text_layers_without_font` names them. Point features label straight, line features label along the line, and polygons do not label at all. `text-size` also sets collision priority, so bigger text survives where labels overlap.
 
 ### Expression Operators
 
@@ -376,7 +396,7 @@ No branch of the renderer draws text, so the three `text-*` properties have no e
 # Build all crates
 cargo build --all
 
-# Run tests (322 tests)
+# Run tests (316 tests)
 cargo test --all
 
 # Clippy lint check
@@ -396,7 +416,7 @@ Jung is a library, not a compose service.
 - **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind an optional feature; the platform deploy does not enable it.
 - **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
-`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization. The other `jung-core` modules (anti-aliasing, labels, TTF, curved labels, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, SLD) are library code with their own tests; nothing on the default render path calls them. SVG output and print furniture are gone.
+`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, the bitmap `LabelEngine` in `label.rs`, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, SLD) are library code with their own tests; nothing on the default render path calls them. SVG output and print furniture are gone.
 
 ## License
 
