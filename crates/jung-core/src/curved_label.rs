@@ -5,19 +5,12 @@
 
 use crate::geometry::Point;
 use crate::renderer::BBox;
-use jung_style::Color;
 
 /// Parameters for curved label placement.
 #[derive(Debug, Clone)]
 pub struct CurvedLabelParams {
     /// Font size in pixels.
     pub font_size: f64,
-    /// Text color.
-    pub color: Color,
-    /// Halo color (outline around text).
-    pub halo_color: Option<Color>,
-    /// Halo width in pixels.
-    pub halo_width: f64,
     /// Minimum spacing between repeated labels (pixels).
     pub repeat_distance: f64,
     /// Maximum angle change between consecutive characters (radians).
@@ -30,9 +23,6 @@ impl Default for CurvedLabelParams {
     fn default() -> Self {
         Self {
             font_size: 12.0,
-            color: Color::rgb(0, 0, 0),
-            halo_color: Some(Color::rgba(255, 255, 255, 200)),
-            halo_width: 2.0,
             repeat_distance: 250.0,
             max_angle_delta: 0.4, // ~23 degrees
             offset: 0.0,

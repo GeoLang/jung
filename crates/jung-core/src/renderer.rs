@@ -502,7 +502,6 @@ impl LabelCollector {
             .collect();
         let params = CurvedLabelParams {
             font_size: style.size,
-            color: style.color,
             ..Default::default()
         };
         let Some(chars) = place_curved_label(screen_points, text, &char_widths, &params) else {

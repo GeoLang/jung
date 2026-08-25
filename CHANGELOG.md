@@ -27,6 +27,10 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- `jung-core`: the bitmap font path. `label.rs` (the old `LabelEngine`, no
+  priority, 5x7 glyphs) is deleted whole, and `curved_label.rs` loses its
+  bitmap renderer half plus the `color`/`halo_color`/`halo_width` params only
+  it read. `PriorityLabelEngine` and the TTF pass are the label path.
 - `jung-core`: `output` and `print_layout`. SVG export, print buffers and page
   furniture are gone. Fenestra prints PDFs with printpdf and tiny-skia, and
   ViewTopia prints client-side, so nothing consumed them. Test count 322 → 316.
