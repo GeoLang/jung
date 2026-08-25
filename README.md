@@ -35,7 +35,7 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 - **Rule-Based Cascading** — multiple rules per feature with priority cascade, zoom-bounded rules, expression-based filters, source tracking for debugging
 
 ### GPU Rendering
-- **Vello Backend** — `jung-vello` builds a `vello::Scene` from styled features. Submitting that scene to a GPU is the caller's job, jung does not own a wgpu device
+- **Vello Backend** — `jung-vello` builds a `vello::Scene` from styled features, geometry plus `text-field` labels once you give it a font with `SceneBuilder::with_font`. Submitting that scene to a GPU is the caller's job, jung does not own a wgpu device
 - **Layer Composition** — per-layer scene building with configurable paint properties
 - **Coordinate Projection** — geographic-to-screen transform with bbox mapping
 
@@ -48,7 +48,7 @@ Jung transforms geospatial features + style definitions into rendered raster pix
 
 ### Output Formats
 - **Raster (RGBA pixels)** — direct pixel buffer output for tile generation
-- **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer, geometry only, no labels
+- **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer. Point and polygon labels draw as glyph runs, line labels do not
 
 `Renderer` takes no DPI or scale factor. You can allocate a larger pixel buffer, but nothing scales stroke widths or symbol sizes with it, so a 1px line is still 1px at 600 DPI.
 
@@ -127,7 +127,7 @@ jung-core/
                         Nothing renders it
 
 jung-vello/
-└── lib.rs            — Vello GPU scene builder, wgpu rendering
+└── lib.rs            — Vello GPU scene builder, geometry and glyph runs
 
 jung-mvt/
 └── lib.rs            — Mapbox Vector Tile protobuf decoder
@@ -388,6 +388,8 @@ The Block column is the style-layer object the property deserializes from. A pro
 | `text-font` | layout | string[] | | First entry picks a family from the renderer's `FontSet` |
 
 Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one, text layers draw nothing and `text_layers_without_font` names them. Point features label straight, line features label along the line, and polygons do not label at all. `text-size` also sets collision priority, so bigger text survives where labels overlap.
+
+`jung-vello` labels from the same properties but places them differently: `SceneBuilder::with_font` takes one face that draws every text layer whatever `text-font` names, points and every part of a multipoint label at the feature, polygons label at the centroid of each exterior ring, and lines do not label. There is no collision deconfliction, no halo and no kerning, so two labels over the same pixels both draw.
 
 ### Expression Operators
 

@@ -272,6 +272,33 @@ pub fn centroid(geom: &Geometry) -> Point {
     }
 }
 
+/// Area-weighted centroid of a polygon ring. Holes do not move it, and a ring
+/// with no area falls back to the origin.
+pub fn polygon_centroid(exterior: &[Point]) -> Point {
+    let n = exterior.len();
+    if n == 0 {
+        return Point { x: 0.0, y: 0.0 };
+    }
+    let mut cx = 0.0;
+    let mut cy = 0.0;
+    let mut a = 0.0;
+    for i in 0..n {
+        let j = (i + 1) % n;
+        let cross = exterior[i].x * exterior[j].y - exterior[j].x * exterior[i].y;
+        cx += (exterior[i].x + exterior[j].x) * cross;
+        cy += (exterior[i].y + exterior[j].y) * cross;
+        a += cross;
+    }
+    a /= 2.0;
+    if a.abs() < 1e-10 {
+        return Point { x: 0.0, y: 0.0 };
+    }
+    Point {
+        x: cx / (6.0 * a),
+        y: cy / (6.0 * a),
+    }
+}
+
 // =============================================================================
 // Internal helpers
 // =============================================================================
@@ -425,31 +452,6 @@ fn polyline_length(pts: &[Point]) -> f64 {
             (dx * dx + dy * dy).sqrt()
         })
         .sum()
-}
-
-fn polygon_centroid(exterior: &[Point]) -> Point {
-    let n = exterior.len();
-    if n == 0 {
-        return Point { x: 0.0, y: 0.0 };
-    }
-    let mut cx = 0.0;
-    let mut cy = 0.0;
-    let mut a = 0.0;
-    for i in 0..n {
-        let j = (i + 1) % n;
-        let cross = exterior[i].x * exterior[j].y - exterior[j].x * exterior[i].y;
-        cx += (exterior[i].x + exterior[j].x) * cross;
-        cy += (exterior[i].y + exterior[j].y) * cross;
-        a += cross;
-    }
-    a /= 2.0;
-    if a.abs() < 1e-10 {
-        return Point { x: 0.0, y: 0.0 };
-    }
-    Point {
-        x: cx / (6.0 * a),
-        y: cy / (6.0 * a),
-    }
 }
 
 fn for_each_point(geom: &Geometry, f: &mut impl FnMut(&Point)) {

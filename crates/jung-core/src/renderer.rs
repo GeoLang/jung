@@ -10,9 +10,10 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 /// Mapbox's default `text-size`, used when a text layer names none.
-const DEFAULT_TEXT_SIZE_PX: f32 = 16.0;
+pub const DEFAULT_TEXT_SIZE_PX: f32 = 16.0;
 
-const DEFAULT_TEXT_COLOR: Color = Color::rgb(0, 0, 0);
+/// Mapbox's default `text-color`, used when a text layer names none.
+pub const DEFAULT_TEXT_COLOR: Color = Color::rgb(0, 0, 0);
 
 /// Type size is the only importance signal a Mapbox style carries, so bigger
 /// text outranks smaller text when two labels want the same pixels.
@@ -597,7 +598,10 @@ fn priority_for_text_size(size: f64) -> LabelPriority {
 
 /// Substitute `{property}` tokens in a `text-field` value. An unknown property
 /// leaves nothing behind, as in Mapbox GL.
-fn expand_property_tokens(template: &str, properties: &HashMap<String, PropertyValue>) -> String {
+pub fn expand_property_tokens(
+    template: &str,
+    properties: &HashMap<String, PropertyValue>,
+) -> String {
     if !template.contains('{') {
         return template.to_string();
     }

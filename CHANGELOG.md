@@ -27,9 +27,21 @@ All notable changes to this project will be documented in this file.
   path. Fonts come from the caller via `Renderer::with_fonts`, and
   `text_layers_without_font` names the layers skipped when none is given.
   `Renderer::place_labels` returns the placements without drawing them.
-  Polygons do not label, and `jung-vello` still carries geometry only.
+  Polygons do not label.
 - `jung-cli`: `--font` and `--font-family`, and a warning naming the text layers
   skipped for want of a font.
+
+- `jung-vello`: text layers draw. `SceneBuilder::with_font` takes TTF/OTF bytes
+  and `build` encodes a `text-field` as a vello glyph run at `text-size` in
+  `text-color`, centred on a point or on the centroid of a polygon's exterior
+  ring. Glyph ids and advances come from skrifa, the font crate vello already
+  reads outlines with. One face draws every text layer whatever `text-font`
+  names: there is no discovery, no fallback, no kerning, no halo, no collision
+  deconfliction, and lines do not label.
+- `jung-core`: `renderer::expand_property_tokens`, `renderer::DEFAULT_TEXT_SIZE_PX`,
+  `renderer::DEFAULT_TEXT_COLOR` and `ogc::polygon_centroid` are public, so
+  `jung-vello` reads `{property}` tokens and the Mapbox defaults the same way
+  the CPU renderer does.
 
 ### Removed
 

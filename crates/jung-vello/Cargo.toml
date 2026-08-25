@@ -9,4 +9,5 @@ authors = ["GeoLang <tiletopia@proton.me>"]
 [dependencies]
 jung-core = { path = "../jung-core" }
 jung-style = { path = "../jung-style" }
+skrifa = "0.42"
 vello = "0.9"

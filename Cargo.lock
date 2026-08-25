@@ -632,6 +632,7 @@ version = "0.1.0"
 dependencies = [
  "jung-core",
  "jung-style",
+ "skrifa",
  "vello",
 ]
 
