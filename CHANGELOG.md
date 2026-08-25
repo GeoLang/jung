@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- `jung-core`: `geojson::parse_geojson_geometry` reads every GeoJSON geometry
+  type. `jung-cli` and `jung-wasm` both call it, so lines and polygons render
+  instead of being dropped, a GeometryCollection becomes one feature per member
+  sharing the feature's properties, and a geometry that does not parse fails the
+  whole input naming the feature index. `jung-cli` computes its default bbox
+  from every geometry, not only points.
 - `jung-wasm`: `render_to_pixels` is now a method on an exported `Renderer`
   class, and `add_font(family, bytes)` feeds caller-supplied TTF/OTF into the
   label pass, so browser renders carry labels. Unreadable font bytes throw.

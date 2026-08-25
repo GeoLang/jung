@@ -11,6 +11,7 @@
 pub mod classification;
 pub mod clustering;
 pub mod extrusion;
+pub mod geojson;
 pub mod geometry;
 pub mod heatmap;
 pub mod layout;

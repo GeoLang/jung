@@ -215,7 +215,7 @@
             <h2>Features</h2>
             <div class="note">
                 <p><strong>What the renderer actually draws.</strong> <code>Renderer::render</code> covers points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the <code>text-*</code> properties once you hand it a font. Cards marked <span class="tag">library only</span> are modules with their own tests that nothing on the render path calls: you have to call them yourself.</p>
-                <p>There is no GeoJSON parser. The CLI and the WebAssembly build each read only <code>"Point"</code> geometries and give every feature empty properties, so they render an empty buffer for real data and every data-driven expression evaluates against nothing.</p>
+                <p>The CLI and the WebAssembly build both read GeoJSON through <code>jung_core::geojson</code>, which covers every geometry type. A GeometryCollection becomes one feature per member. Feature properties come through, except arrays and objects, which are dropped.</p>
             </div>
             <div class="features">
                 <div class="feature-card">

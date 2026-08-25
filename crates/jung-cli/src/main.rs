@@ -1,5 +1,7 @@
 use clap::Parser;
-use jung_core::geometry::{Feature, Geometry, Point};
+use jung_core::geojson::parse_geojson_geometry;
+use jung_core::geometry::Feature;
+use jung_core::ogc::envelope;
 use jung_core::renderer::{BBox, Renderer};
 use jung_core::text::{FontFace, FontSet};
 use jung_style::{parse_style, properties_from_json};
@@ -158,13 +160,13 @@ fn compute_bbox(features: &[Feature]) -> Option<BBox> {
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
 
-    for f in features {
-        if let Geometry::Point(pt) = &f.geometry {
-            min_x = min_x.min(pt.x);
-            min_y = min_y.min(pt.y);
-            max_x = max_x.max(pt.x);
-            max_y = max_y.max(pt.y);
-        }
+    for feature in features {
+        let (feature_min_x, feature_min_y, feature_max_x, feature_max_y) =
+            envelope(&feature.geometry);
+        min_x = min_x.min(feature_min_x);
+        min_y = min_y.min(feature_min_y);
+        max_x = max_x.max(feature_max_x);
+        max_y = max_y.max(feature_max_y);
     }
 
     // Add small padding so single-point doesn't collapse
@@ -185,6 +187,9 @@ fn compute_bbox(features: &[Feature]) -> Option<BBox> {
     })
 }
 
+/// Read a FeatureCollection, one `Feature` per geometry. A GeometryCollection
+/// member becomes its own feature sharing the properties of the feature it came
+/// from.
 fn parse_geojson_features(geojson: &str) -> Result<Vec<Feature>, String> {
     let value: serde_json::Value =
         serde_json::from_str(geojson).map_err(|e| format!("JSON parse: {e}"))?;
@@ -195,45 +200,26 @@ fn parse_geojson_features(geojson: &str) -> Result<Vec<Feature>, String> {
         .ok_or("missing 'features' array")?;
 
     let mut features = Vec::new();
-    for feat_val in features_array {
-        let geom = feat_val.get("geometry").ok_or("feature missing geometry")?;
-        let geom_type = geom
-            .get("type")
-            .and_then(|t| t.as_str())
-            .ok_or("geometry missing type")?;
+    for (index, feature_value) in features_array.iter().enumerate() {
+        let geometry_value = feature_value
+            .get("geometry")
+            .ok_or_else(|| format!("feature {index}: missing geometry"))?;
+        let geometries =
+            parse_geojson_geometry(geometry_value).map_err(|e| format!("feature {index}: {e}"))?;
+        let properties = feature_value
+            .get("properties")
+            .map(properties_from_json)
+            .unwrap_or_default();
 
-        let coords = geom.get("coordinates");
-
-        match geom_type {
-            "Point" => {
-                if let Some(pt) = coords.and_then(parse_point) {
-                    features.push(Feature {
-                        geometry: Geometry::Point(pt),
-                        properties: feat_val
-                            .get("properties")
-                            .map(properties_from_json)
-                            .unwrap_or_default(),
-                    });
-                }
-            }
-            _ => {
-                // Other geometry types will be supported in future versions
-            }
+        for geometry in geometries {
+            features.push(Feature {
+                geometry,
+                properties: properties.clone(),
+            });
         }
     }
 
     Ok(features)
-}
-
-fn parse_point(coords: &serde_json::Value) -> Option<Point> {
-    let arr = coords.as_array()?;
-    if arr.len() < 2 {
-        return None;
-    }
-    Some(Point {
-        x: arr[0].as_f64()?,
-        y: arr[1].as_f64()?,
-    })
 }
 
 #[cfg(test)]
@@ -267,6 +253,51 @@ mod tests {
                 "type": "Feature",
                 "geometry": { "type": "Point", "coordinates": [0.5, 0.5] },
                 "properties": {}
+            }
+        ]
+    }"#;
+
+    /// One layer that strokes lines and fills polygons, no text.
+    const GREEN_GEOMETRY_STYLE: &str = r##"{"layers": [{
+        "id": "geometry",
+        "paint": { "fill-color": "#00ff00", "line-color": "#00ff00", "line-width": 2.0 }
+    }]}"##;
+
+    const DIAGONAL_LINE_AND_SQUARE: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[0.1, 0.1], [0.9, 0.9]]
+                },
+                "properties": {}
+            },
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0.1, 0.6], [0.4, 0.6], [0.4, 0.9], [0.1, 0.9], [0.1, 0.6]]]
+                },
+                "properties": {}
+            }
+        ]
+    }"#;
+
+    const COLLECTION_OF_TWO_POINTS: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "GeometryCollection",
+                    "geometries": [
+                        { "type": "Point", "coordinates": [0.2, 0.2] },
+                        { "type": "Point", "coordinates": [0.8, 0.8] }
+                    ]
+                },
+                "properties": { "name": "Springfield" }
             }
         ]
     }"#;
@@ -306,6 +337,51 @@ mod tests {
             .chunks(4)
             .filter(|px| px[1] == 255 && px[0] == 0 && px[3] > 0)
             .count()
+    }
+
+    fn drawn_pixel_count(features: &[Feature]) -> usize {
+        let renderer = Renderer::new(256, 256).unwrap();
+        let style = parse_style(GREEN_GEOMETRY_STYLE).unwrap();
+        let buffer = renderer.render(&style, features, &UNIT_BBOX).unwrap();
+        buffer.data.chunks(4).filter(|px| px[3] > 0).count()
+    }
+
+    #[test]
+    fn a_linestring_and_a_polygon_both_draw() {
+        let features = parse_geojson_features(DIAGONAL_LINE_AND_SQUARE).unwrap();
+        assert_eq!(features.len(), 2);
+
+        let line = drawn_pixel_count(&features[..1]);
+        assert!(line > 100, "expected line pixels, got {line}");
+
+        let polygon = drawn_pixel_count(&features[1..]);
+        assert!(polygon > 1000, "expected fill pixels, got {polygon}");
+    }
+
+    #[test]
+    fn a_geometry_collection_becomes_one_feature_per_member() {
+        let features = parse_geojson_features(COLLECTION_OF_TWO_POINTS).unwrap();
+        assert_eq!(features.len(), 2);
+        for feature in &features {
+            assert_eq!(
+                feature.properties.get("name"),
+                Some(&PropertyValue::String("Springfield".into()))
+            );
+        }
+    }
+
+    #[test]
+    fn a_geometry_that_cannot_be_parsed_names_its_feature() {
+        let broken = r#"{
+            "type": "FeatureCollection",
+            "features": [
+                { "type": "Feature", "geometry": { "type": "Point", "coordinates": [0, 0] } },
+                { "type": "Feature", "geometry": { "type": "Circle", "coordinates": [0, 0] } }
+            ]
+        }"#;
+        let error = parse_geojson_features(broken).unwrap_err();
+        assert!(error.contains("feature 1"), "got {error}");
+        assert!(error.contains("Circle"), "got {error}");
     }
 
     #[test]

@@ -596,6 +596,7 @@ dependencies = [
  "jung-mvt",
  "jung-style",
  "serde",
+ "serde_json",
  "thiserror",
  "ttf-parser",
 ]

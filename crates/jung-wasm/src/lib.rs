@@ -3,7 +3,8 @@
 //! WebAssembly bindings for the Jung symbology engine.
 //! Allows browser-side rendering of styled geospatial features.
 
-use jung_core::geometry::{Feature, Geometry, Point};
+use jung_core::geojson::parse_geojson_geometry;
+use jung_core::geometry::Feature;
 use jung_core::renderer::{BBox, Renderer};
 use jung_core::text::{FontFace, FontSet};
 use jung_style::{parse_style, properties_from_json};
@@ -78,7 +79,8 @@ impl WasmRenderer {
     ) -> Result<Vec<u8>, String> {
         let style = parse_style(style_json).map_err(|e| format!("Style error: {e}"))?;
 
-        let features = parse_geojson_points(geojson).map_err(|e| format!("GeoJSON error: {e}"))?;
+        let features =
+            parse_geojson_features(geojson).map_err(|e| format!("GeoJSON error: {e}"))?;
 
         let renderer = Renderer::new(self.width, self.height)
             .map_err(|e| format!("Renderer error: {e}"))?
@@ -92,10 +94,11 @@ impl WasmRenderer {
     }
 }
 
-/// Minimal GeoJSON point parser (FeatureCollection with Point geometries),
-/// carrying each feature's properties so `{token}` labels and data-driven
-/// expressions have something to read.
-fn parse_geojson_points(geojson: &str) -> Result<Vec<Feature>, String> {
+/// Read a GeoJSON FeatureCollection, one `Feature` per geometry, carrying each
+/// feature's properties so `{token}` labels and data-driven expressions have
+/// something to read. A GeometryCollection member becomes its own feature
+/// sharing the properties of the feature it came from.
+fn parse_geojson_features(geojson: &str) -> Result<Vec<Feature>, String> {
     let value: serde_json::Value =
         serde_json::from_str(geojson).map_err(|e| format!("JSON parse: {e}"))?;
 
@@ -105,37 +108,23 @@ fn parse_geojson_points(geojson: &str) -> Result<Vec<Feature>, String> {
         .ok_or("missing 'features' array")?;
 
     let mut features = Vec::new();
-    for feat_val in features_array {
-        let geom = feat_val.get("geometry").ok_or("feature missing geometry")?;
+    for (index, feature_value) in features_array.iter().enumerate() {
+        let geometry_value = feature_value
+            .get("geometry")
+            .ok_or_else(|| format!("feature {index}: missing geometry"))?;
+        let geometries =
+            parse_geojson_geometry(geometry_value).map_err(|e| format!("feature {index}: {e}"))?;
+        let properties = feature_value
+            .get("properties")
+            .map(properties_from_json)
+            .unwrap_or_default();
 
-        let geom_type = geom
-            .get("type")
-            .and_then(|t| t.as_str())
-            .ok_or("geometry missing type")?;
-
-        if geom_type != "Point" {
-            continue;
+        for geometry in geometries {
+            features.push(Feature {
+                geometry,
+                properties: properties.clone(),
+            });
         }
-
-        let coords = geom
-            .get("coordinates")
-            .and_then(|c| c.as_array())
-            .ok_or("Point missing coordinates")?;
-
-        if coords.len() < 2 {
-            continue;
-        }
-
-        let x = coords[0].as_f64().ok_or("invalid x coordinate")?;
-        let y = coords[1].as_f64().ok_or("invalid y coordinate")?;
-
-        features.push(Feature {
-            geometry: Geometry::Point(Point { x, y }),
-            properties: feat_val
-                .get("properties")
-                .map(properties_from_json)
-                .unwrap_or_default(),
-        });
     }
 
     Ok(features)
@@ -181,6 +170,43 @@ mod tests {
         ]
     }"#;
 
+    /// One layer that strokes lines and fills polygons, no text.
+    const GREEN_GEOMETRY_STYLE: &str = r##"{"layers": [{
+        "id": "geometry",
+        "paint": { "fill-color": "#00ff00", "line-color": "#00ff00", "line-width": 2.0 }
+    }]}"##;
+
+    const DIAGONAL_LINE: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[0.1, 0.1], [0.9, 0.9]]
+                },
+                "properties": {}
+            }
+        ]
+    }"#;
+
+    const SQUARE_WITH_A_HOLE: &str = r#"{
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9], [0.1, 0.1]],
+                        [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6], [0.4, 0.4]]
+                    ]
+                },
+                "properties": {}
+            }
+        ]
+    }"#;
+
     const UNIT_BBOX: BBox = BBox {
         min_x: 0.0,
         min_y: 0.0,
@@ -207,6 +233,53 @@ mod tests {
             .chunks(4)
             .filter(|px| px[1] == 255 && px[0] == 0 && px[3] > 0)
             .count()
+    }
+
+    fn drawn_pixel_count(pixels: &[u8]) -> usize {
+        pixels.chunks(4).filter(|px| px[3] > 0).count()
+    }
+
+    #[test]
+    fn a_linestring_and_a_polygon_both_draw() {
+        let renderer = WasmRenderer::new(256, 256);
+
+        let line = renderer
+            .render_pixels(GREEN_GEOMETRY_STYLE, DIAGONAL_LINE, UNIT_BBOX)
+            .unwrap();
+        assert!(
+            drawn_pixel_count(&line) > 100,
+            "expected line pixels, got {}",
+            drawn_pixel_count(&line)
+        );
+
+        let polygon = renderer
+            .render_pixels(GREEN_GEOMETRY_STYLE, SQUARE_WITH_A_HOLE, UNIT_BBOX)
+            .unwrap();
+        assert!(
+            drawn_pixel_count(&polygon) > 1000,
+            "expected fill pixels, got {}",
+            drawn_pixel_count(&polygon)
+        );
+        let alpha_at = |x: usize, y: usize| polygon[(y * 256 + x) * 4 + 3];
+        assert!(alpha_at(64, 64) > 0, "the ring interior should be filled");
+        assert_eq!(alpha_at(128, 128), 0, "the hole should be left unfilled");
+    }
+
+    #[test]
+    fn a_geometry_that_cannot_be_parsed_names_its_feature() {
+        let renderer = WasmRenderer::new(64, 64);
+        let broken = r#"{
+            "type": "FeatureCollection",
+            "features": [
+                { "type": "Feature", "geometry": { "type": "Point", "coordinates": [0, 0] } },
+                { "type": "Feature", "geometry": { "type": "Circle", "coordinates": [0, 0] } }
+            ]
+        }"#;
+        let error = renderer
+            .render_pixels(GREEN_GEOMETRY_STYLE, broken, UNIT_BBOX)
+            .unwrap_err();
+        assert!(error.contains("feature 1"), "got {error}");
+        assert!(error.contains("Circle"), "got {error}");
     }
 
     #[test]
@@ -283,7 +356,7 @@ mod tests {
 
     #[test]
     fn properties_reach_the_features() {
-        let features = parse_geojson_points(NAMED_CENTRE_POINT).unwrap();
+        let features = parse_geojson_features(NAMED_CENTRE_POINT).unwrap();
         assert_eq!(
             features[0].properties.get("name"),
             Some(&jung_style::PropertyValue::String("Springfield".into()))
@@ -315,11 +388,11 @@ mod tests {
                 }
             ]
         }"#;
-        let features = parse_geojson_points(geojson).unwrap();
+        let features = parse_geojson_features(geojson).unwrap();
         assert_eq!(features.len(), 1);
         assert_eq!(
             features[0].geometry,
-            Geometry::Point(Point { x: 1.0, y: 2.0 })
+            jung_core::geometry::Geometry::Point(jung_core::geometry::Point { x: 1.0, y: 2.0 })
         );
     }
 }
