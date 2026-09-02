@@ -2,8 +2,8 @@
 //!
 //! Core rendering engine for geospatial symbology.
 //!
-//! Takes styled geospatial features and produces rendered output
-//! (raw pixels, SVG, or vector draw commands).
+//! Takes styled geospatial features and produces RGBA pixel buffers
+//! and label placements.
 
 #![allow(unknown_lints)]
 #![allow(clippy::manual_checked_ops)]

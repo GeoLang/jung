@@ -67,17 +67,17 @@ Features carry their properties, so `{property}` label tokens and data-driven ex
 ## Architecture
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  jung-style │────▶│  jung-core  │────▶│  jung-cli   │
-│  (parsing)  │     │ (rendering) │     │   (CLI)     │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                      ┌────┴────┐
-                      ▼         ▼
-               ┌───────────┐ ┌───────────┐
-               │ jung-wasm │ │jung-vello │
-               │ (browser) │ │  (GPU)    │
-               └───────────┘ └───────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  jung-esri  │────▶│  jung-style │────▶│  jung-core  │────▶│  jung-cli   │
+│ (drawingInfo│     │  (parsing)  │     │ (rendering) │     │   (CLI)     │
+│  to style)  │     └─────────────┘     └─────────────┘     └─────────────┘
+└─────────────┘                          ▲      │
+                    ┌─────────────┐      │ ┌────┴────┐
+                    │  jung-mvt   │──────┘ ▼         ▼
+                    │  (tiles)    │ ┌───────────┐ ┌───────────┐
+                    └─────────────┘ │ jung-wasm │ │jung-vello │
+                                    │ (browser) │ │  (GPU)    │
+                                    └───────────┘ └───────────┘
 ```
 
 ### Crates
@@ -98,12 +98,12 @@ Features carry their properties, so `{property}` label tokens and data-driven ex
 jung-core/
 ├── renderer.rs       — Main render orchestration, pixel buffers, bbox
 ├── geometry.rs       — Point, Geometry, Feature types
+├── geojson.rs        — GeoJSON geometry parsing, one geometry per collection member
 ├── line.rs           — Line rendering with caps, joins, dash patterns
 ├── polygon.rs        — Polygon fill and stroke
 ├── antialias.rs      — Anti-aliased lines, circles, polygons (Wu/distance)
 ├── marker.rs         — Icon/sprite rendering and blitting
 ├── symbols.rs        — Built-in vector symbol library (16 icons)
-├── label.rs          — Text placement with collision detection
 ├── text.rs           — TrueType/OTF font rasterization
 ├── curved_label.rs   — Text along line geometries
 ├── mvt.rs            — jung-mvt tiles normalised into engine coordinates
@@ -115,7 +115,7 @@ jung-core/
 ├── milstd2525.rs     — MIL-STD-2525 military symbology
 ├── maritime.rs       — S-52/S-57 nautical chart symbology
 ├── topographic.rs    — Contours, hillshade, hypsometric tinting
-├── ogc.rs            — OGC WKT/WKB, Filter Encoding, Simple Features ops
+├── ogc.rs            — OGC WKT/WKB, filter predicates, Simple Features ops
 ├── sld.rs            — SLD/SE 1.1 XML import and export
 ├── rules.rs          — Rule-based cascading style engine
 ├── tiling.rs         — XYZ slippy-map tile addressing and per-tile filtering
@@ -395,7 +395,7 @@ Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one,
 
 | Category | Operators |
 |----------|-----------|
-| Data | `get`, `has`, `geometry-type` |
+| Data | `get`, `has`, `geometry-type`, `id` |
 | Zoom | `zoom` |
 | Comparison | `==`, `!=`, `>`, `>=`, `<`, `<=` |
 | Logical | `all`, `any`, `!` |
@@ -404,6 +404,7 @@ Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one,
 | Control | `case`, `match`, `coalesce` |
 | Interpolation | `interpolate` (linear, exponential, cubic-bezier) |
 | Steps | `step` |
+| Literal | `literal` |
 | Conversion | `to-number`, `to-string`, `to-boolean`, `to-color` |
 
 ### Color Formats
@@ -418,7 +419,7 @@ Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one,
 # Build all crates
 cargo build --all
 
-# Run tests (316 tests)
+# Run tests (338 tests)
 cargo test --all
 
 # Clippy lint check
@@ -438,7 +439,7 @@ Jung is a library, not a compose service.
 - **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind an optional feature; the platform deploy does not enable it.
 - **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
-`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, OGC, layout, SLD) are library code with their own tests; nothing on the default render path calls them. SVG output and print furniture are gone.
+`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, layout, SLD) are library code with their own tests that nothing on the default render path calls. Two `ogc` functions are called from outside: `jung-cli` computes its default bbox with `envelope`, and `jung-vello` places polygon labels with `polygon_centroid`. SVG output and print furniture are gone.
 
 ## License
 

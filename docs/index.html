@@ -220,7 +220,7 @@
             <div class="features">
                 <div class="feature-card">
                     <h3>GPU Accelerated</h3>
-                    <p>Builds a Vello scene graph from styled features. Hand it to your own wgpu renderer to draw on the GPU.</p>
+                    <p>Builds a Vello scene graph from styled features. Hand it to your own wgpu renderer to draw on the GPU. One face supplied by the caller draws every text layer, with no fallback, kerning, halo or collision deconfliction.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Mapbox GL Compatible</h3>
@@ -228,7 +228,7 @@
                 </div>
                 <div class="feature-card">
                     <h3>OGC Standards <span class="tag">library only</span></h3>
-                    <p>WKT/WKB serialization, Simple Features operations (envelope, area, length, centroid), SLD/SE 1.1 import and export. Filter predicates are a Rust enum and evaluator, not OGC Filter Encoding, whose XML is neither read nor written. SLD import matches rules as the literal <code>&lt;se:Rule</code>, so another namespace prefix yields zero rules with no error, and it never parses filters, so imported rules match every feature.</p>
+                    <p>WKT/WKB serialization, Simple Features operations (envelope, area, length, centroid), SLD/SE 1.1 import and export. <code>envelope</code> and <code>polygon_centroid</code> are the exception to the library-only mark, the CLI defaults its bbox with one and <code>jung-vello</code> places polygon labels with the other. Filter predicates are a Rust enum and evaluator, not OGC Filter Encoding, whose XML is neither read nor written. SLD import matches rules as the literal <code>&lt;se:Rule</code>, so another namespace prefix yields zero rules with no error, and it never parses filters, so imported rules match every feature.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Anti-Aliasing <span class="tag">library only</span></h3>
@@ -240,7 +240,7 @@
                 </div>
                 <div class="feature-card">
                     <h3>Labels</h3>
-                    <p><code>Renderer::render</code> draws a style's <code>text-field</code> once you give it a font with <code>with_fonts</code>: TrueType glyphs from <code>text.rs</code>, priority deconfliction from <code>label_priority.rs</code>, and text turned along line features by <code>curved_label.rs</code>. Point and line features label, polygons do not. Without a font nothing is drawn and <code>text_layers_without_font</code> names the layers skipped. The 5x7 bitmap <code>LabelEngine</code> in <code>label.rs</code> is still library only.</p>
+                    <p><code>Renderer::render</code> draws a style's <code>text-field</code> once you give it a font with <code>with_fonts</code>: TrueType glyphs from <code>text.rs</code>, priority deconfliction from <code>label_priority.rs</code>, and text turned along line features by <code>curved_label.rs</code>. Point and line features label, polygons do not. Without a font nothing is drawn and <code>text_layers_without_font</code> names the layers skipped.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Vector Tiles (MVT)</h3>
@@ -248,7 +248,7 @@
                 </div>
                 <div class="feature-card">
                     <h3>Outputs</h3>
-                    <p>RGBA pixels and a Vello scene graph for your own wgpu renderer, which carries geometry only and no labels. <code>Renderer</code> takes no DPI or scale factor, so a 1px line stays 1px however large the buffer.</p>
+                    <p>RGBA pixels and a Vello scene graph for your own wgpu renderer. The scene carries geometry, and labels too once <code>SceneBuilder::with_font</code> has a face: points and polygon centroids draw as glyph runs, lines do not. <code>Renderer</code> takes no DPI or scale factor, so a 1px line stays 1px however large the buffer.</p>
                 </div>
                 <div class="feature-card">
                     <h3>GeoLang Ecosystem</h3>
