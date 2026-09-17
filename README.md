@@ -419,7 +419,7 @@ Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one,
 # Build all crates
 cargo build --all
 
-# Run tests (338 tests)
+# Run tests (340 tests)
 cargo test --all
 
 # Clippy lint check

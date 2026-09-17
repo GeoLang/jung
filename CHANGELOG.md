@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- 2026-09-16: docs match the code. The README's build section says 340 tests,
+  which is what `cargo test --all` lists, not 338. The docs page quick start
+  builds the `features` vector it passes to `render`, so the snippet compiles.
+
 ### Added
 
 - `jung-core`: `geojson::parse_geojson_geometry` reads every GeoJSON geometry

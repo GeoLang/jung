@@ -259,7 +259,8 @@
 
         <section>
             <h2>Quick Start</h2>
-            <pre><code>use jung_core::renderer::{BBox, Renderer};
+            <pre><code>use jung_core::geometry::{Feature, Geometry, Point};
+use jung_core::renderer::{BBox, Renderer};
 use jung_style::parse_style;
 
 let style = parse_style(r#"{
@@ -268,6 +269,11 @@ let style = parse_style(r#"{
         "paint": { "circle-color": "#ff0000", "circle-radius": 5.0 }
     }]
 }"#).unwrap();
+
+let features = vec![Feature {
+    geometry: Geometry::Point(Point { x: -73.9857, y: 40.7484 }),
+    properties: Default::default(),
+}];
 
 let renderer = Renderer::new(512, 512).unwrap();
 let bbox = BBox { min_x: -180.0, min_y: -90.0, max_x: 180.0, max_y: 90.0 };
