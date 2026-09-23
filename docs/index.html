@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jung — Geospatial Symbology Engine</title>
+    <title>Jung: Geospatial Symbology Engine</title>
     <style>
         :root {
             --primary: #6B46C1;
@@ -198,13 +198,13 @@
     <div class="hero">
         <h1>Jung</h1>
         <p class="subtitle">
-            A high-performance geospatial symbology and cartographic rendering engine written in Rust.
+            Geospatial symbology and cartographic rendering engine written in Rust.
         </p>
         <div class="badges">
             <span class="badge">Rust</span>
             <span class="badge">WebAssembly</span>
             <span class="badge">GPU (Vello/wgpu)</span>
-            <span class="badge">Mapbox GL Compatible</span>
+            <span class="badge">Mapbox GL Styles</span>
             <span class="badge">OGC Standards</span>
             <span class="badge">AGPL-3.0-or-later</span>
         </div>
@@ -214,7 +214,7 @@
         <section>
             <h2>Features</h2>
             <div class="note">
-                <p><strong>What the renderer actually draws.</strong> <code>Renderer::render</code> covers points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the <code>text-*</code> properties once you hand it a font. Cards marked <span class="tag">library only</span> are modules with their own tests that nothing on the render path calls: you have to call them yourself.</p>
+                <p><strong>What the renderer actually draws.</strong> <code>Renderer::render</code> covers points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the <code>text-*</code> properties once you hand it a font. Every style layer draws every feature: there is no <code>source</code>, <code>type</code> or <code>filter</code> matching. Cards marked <span class="tag">library only</span> are modules with their own tests that nothing on the render path calls: you have to call them yourself.</p>
                 <p>The CLI and the WebAssembly build both read GeoJSON through <code>jung_core::geojson</code>, which covers every geometry type. A GeometryCollection becomes one feature per member. Feature properties come through, except arrays and objects, which are dropped.</p>
             </div>
             <div class="features">
@@ -223,8 +223,8 @@
                     <p>Builds a Vello scene graph from styled features. Hand it to your own wgpu renderer to draw on the GPU. One face supplied by the caller draws every text layer, with no fallback, kerning, halo or collision deconfliction.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Mapbox GL Compatible</h3>
-                    <p>Full expression language: data-driven styling, zoom interpolation, property-based filters. Drop-in style compatibility.</p>
+                    <h3>Mapbox GL Styles</h3>
+                    <p>A subset of the Mapbox GL style spec: fill, line, circle, icon and text properties, most of them data-driven, and an expression language with <code>get</code>, <code>case</code>, <code>match</code>, <code>interpolate</code>, <code>step</code>, comparison, math and string operators. Properties outside that set are ignored without an error.</p>
                 </div>
                 <div class="feature-card">
                     <h3>OGC Standards <span class="tag">library only</span></h3>
@@ -245,6 +245,10 @@
                 <div class="feature-card">
                     <h3>Vector Tiles (MVT)</h3>
                     <p>Protobuf decoder for Mapbox Vector Tiles with <code>thiserror</code> its only dependency. Geometry command parsing, zigzag decoding, attribute extraction.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Esri drawingInfo</h3>
+                    <p><code>jung-esri</code> translates the <code>drawingInfo</code> an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, marker, line, fill and inline picture symbols, and the first label class. Anything it cannot reproduce is listed by its esri name in a loss report.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Outputs</h3>
@@ -283,17 +287,17 @@ let pixels = renderer.render(&style, &features, &bbox).unwrap();</code></pre>
         <section>
             <h2>Architecture</h2>
             <div class="architecture">
-                <pre><code>┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│  jung-style │────▶│  jung-core  │────▶│  jung-cli   │
-│  (parsing)  │     │ (rendering) │     │   (CLI)     │
-└─────────────┘     └─────────────┘     └─────────────┘
-                           │
-                      ┌────┴────┐
-                      ▼         ▼
-               ┌───────────┐ ┌───────────┐
-               │ jung-wasm │ │jung-vello │
-               │ (browser) │ │  (GPU)    │
-               └───────────┘ └───────────┘</code></pre>
+                <pre><code>┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  jung-esri  │────▶│  jung-style │────▶│  jung-core  │────▶│  jung-cli   │
+│ (drawingInfo│     │  (parsing)  │     │ (rendering) │     │   (CLI)     │
+│  to style)  │     └─────────────┘     └─────────────┘     └─────────────┘
+└─────────────┘                          ▲      │
+                    ┌─────────────┐      │ ┌────┴────┐
+                    │  jung-mvt   │──────┘ ▼         ▼
+                    │  (tiles)    │ ┌───────────┐ ┌───────────┐
+                    └─────────────┘ │ jung-wasm │ │jung-vello │
+                                    │ (browser) │ │  (GPU)    │
+                                    └───────────┘ └───────────┘</code></pre>
             </div>
         </section>
 

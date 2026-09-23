@@ -3,66 +3,66 @@
 [![CI](https://github.com/GeoLang/jung/actions/workflows/ci.yml/badge.svg)](https://github.com/GeoLang/jung/actions)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-A high-performance geospatial symbology and cartographic rendering engine written in Rust.
+Geospatial symbology and cartographic rendering engine written in Rust.
 
-Jung transforms geospatial features + style definitions into rendered raster pixels. Named after Carl Jung and his work on archetypal symbols.
+Jung renders geospatial features with a Mapbox GL style into RGBA pixels, or into a Vello scene for the caller to draw on the GPU.
 
 ## Features
 
 ### Core Rendering
-- **Line Rendering** — variable width, dash patterns, line caps (butt/round/square), line joins (miter/round/bevel), offset
-- **Polygon Rendering** — fill, stroke, opacity, scanline rasterization
-- **Data-Driven Styling** — property-based expressions for dynamic colors, widths, sizes
-- **Zoom-Dependent Styling** — interpolated stops for smooth transitions across zoom levels
-- **Icon/Marker Rendering** — sprite atlases, built-in shapes (circle, square, diamond, star, triangle), alpha-composited blitting
-- **Symbol Library** — 16 built-in vector symbols (pin, flag, airport, hospital, fuel, parking, tree, mountain, shields, hazards) rendered at any resolution
-- **Labels** — `Renderer::render` draws a style's `text-field` on point and line features: TTF glyphs, priority deconfliction, text along lines. You supply the font, jung embeds none
-- **TrueType Font Rendering** — TTF/OTF parsing via ttf-parser, glyph rasterization at arbitrary sizes, kerning, grayscale coverage anti-aliasing, rotated glyphs
-- **Curved Labels** — text placed along line geometries, per-character rotation, max angle rejection, repeat spacing
+- **Line Rendering**: variable width, dash patterns, line caps (butt/round/square), line joins (miter/round/bevel), offset
+- **Polygon Rendering**: scanline fill with holes, and a stroke that takes `line-opacity`
+- **Data-Driven Styling**: property-based expressions for dynamic colors, widths, sizes
+- **Zoom-Dependent Styling**: `["zoom"]` in an expression reads the zoom passed to `Renderer::render_at_zoom`. `render` uses zoom 0
+- **Icon/Marker Rendering**: `icon-*` properties draw from a `SpriteAtlas` passed to `Renderer::render_with_sprites`, `render` draws no icons. Built-in icon shapes (circle, square, diamond, star, triangle), alpha-composited blitting
+- **Symbol Library**: 16 built-in vector symbols (pin, flag, airport, hospital, fuel, parking, tree, mountain, shields, hazards) rendered at any resolution
+- **Labels**: `Renderer::render` draws a style's `text-field` on point and line features: TTF glyphs, priority deconfliction, text along lines. You supply the font, jung embeds none
+- **TrueType Font Rendering**: TTF/OTF parsing via ttf-parser, glyph rasterization at arbitrary sizes, kerning, grayscale coverage anti-aliasing, rotated glyphs
+- **Curved Labels**: text placed along line geometries, per-character rotation, max angle rejection, repeat spacing
 
 ### Advanced Symbology
-- **Graduated/Classified** — equal interval, quantile, natural breaks (Fisher-Jenks), standard deviation, manual classification with color ramps
-- **Proportional Symbols** — Flannery scaling (perceptual), data-driven size mapping
-- **Heatmap** — Gaussian kernel density estimation, configurable radius/intensity, weighted points
-- **Temporal Animation** — time-range filtering, keyframe generation, trajectory interpolation, easing functions (linear, ease-in, ease-out, ease-in-out)
-- **3D Extrusion** — pseudo-3D building rendering, directional lighting, painter's algorithm
-- **Clustering** — grid-based spatial hashing, hierarchical multi-zoom, DBSCAN density-based
+- **Graduated/Classified**: equal interval, quantile, natural breaks (Fisher-Jenks), standard deviation, manual classification with color ramps
+- **Proportional Symbols**: Flannery scaling (perceptual), data-driven size mapping
+- **Heatmap**: Gaussian kernel density estimation, configurable radius/intensity, weighted points
+- **Temporal Animation**: time-range filtering, keyframe generation, trajectory interpolation, easing functions (linear, ease-in, ease-out, ease-in-out)
+- **3D Extrusion**: pseudo-3D building rendering, directional lighting, painter's algorithm
+- **Clustering**: grid-based spatial hashing, hierarchical multi-zoom, DBSCAN density-based
 
 ### Specialized Symbology
-- **MIL-STD-2525** — 15-character SIDC parsing, affiliation-based frame shapes (rectangle/diamond/square/circle), color coding, status indicators (planned/destroyed). There is no glyph set: the entity code is parsed and never drawn, so every unit of a given affiliation renders as the same empty frame. Echelon, task force and feint/dummy are parsed and never drawn. Which 2525 revision the SIDC layout follows is inconsistent in the code, treat the parser as unversioned
-- **Maritime S-52/S-57** — IHO color palettes (day/dusk/night modes), depth zone classification, chart symbols (buoys, soundings), safety depth highlighting
-- **Topographic** — contour lines (index/intermediate/supplementary), analytical hillshading (Horn's method), hypsometric tinting (elevation-to-color), DEM processing
-- **Rule-Based Cascading** — multiple rules per feature with priority cascade, zoom-bounded rules, expression-based filters, source tracking for debugging
+- **MIL-STD-2525**: 15-character SIDC parsing, affiliation-based frame shapes (rectangle/diamond/square/circle), color coding, status indicators (planned/destroyed). There is no glyph set: the entity code is parsed and never drawn, so every unit of a given affiliation renders as the same empty frame. Echelon, task force and feint/dummy are parsed and never drawn. Which 2525 revision the SIDC layout follows is inconsistent in the code, treat the parser as unversioned
+- **Maritime S-52/S-57**: IHO color palettes (day/dusk/night modes), depth zone classification, chart symbols (buoys, soundings), safety depth highlighting
+- **Topographic**: contour lines (index/intermediate/supplementary), analytical hillshading (Horn's method), hypsometric tinting (elevation-to-color)
+- **Rule-Based Cascading**: multiple rules per feature with priority cascade, zoom-bounded rules, expression-based filters, source tracking for debugging
 
 ### GPU Rendering
-- **Vello Backend** — `jung-vello` builds a `vello::Scene` from styled features, geometry plus `text-field` labels once you give it a font with `SceneBuilder::with_font`. Submitting that scene to a GPU is the caller's job, jung does not own a wgpu device
-- **Layer Composition** — per-layer scene building with configurable paint properties
-- **Coordinate Projection** — geographic-to-screen transform with bbox mapping
+- **Vello Backend**: `jung-vello` builds a `vello::Scene` from styled features, geometry plus `text-field` labels once you give it a font with `SceneBuilder::with_font`. Submitting that scene to a GPU is the caller's job, jung does not own a wgpu device
+- **Layer Composition**: per-layer scene building with configurable paint properties
+- **Coordinate mapping**: linear bbox-to-pixel mapping, no map projection
 
 ### OGC Standards
-- **Well-Known Text (WKT)** — parse and serialize all geometry types
-- **Well-Known Binary (WKB)** — binary geometry serialization (little-endian)
-- **Filter predicates** — property comparisons, LIKE patterns, logical operators (AND/OR/NOT), BBox spatial filter, as a Rust enum and evaluator. This is not OGC Filter Encoding: the XML grammar is neither read nor written
-- **Simple Features** — envelope, area, length, centroid operations
-- **SLD/SE 1.1** — parse Styled Layer Descriptor XML into jung rules and export jung styles back to SLD. Two limits on import: rules are matched as the literal `<se:Rule`, so a document using any other namespace prefix yields zero rules with no error, and filters are not parsed at all, so every imported rule matches every feature
+- **Well-Known Text (WKT)**: parse and serialize all geometry types
+- **Well-Known Binary (WKB)**: binary geometry serialization (little-endian)
+- **Filter predicates**: property comparisons, LIKE patterns, logical operators (AND/OR/NOT), BBox spatial filter, as a Rust enum and evaluator. This is not OGC Filter Encoding: the XML grammar is neither read nor written
+- **Simple Features**: envelope, area, length, centroid operations
+- **SLD/SE 1.1**: parse Styled Layer Descriptor XML into jung rules and export jung styles back to SLD. Two limits on import: rules are matched as the literal `<se:Rule`, so a document using any other namespace prefix yields zero rules with no error, and filters are not parsed at all, so every imported rule matches every feature
 
 ### Output Formats
-- **Raster (RGBA pixels)** — direct pixel buffer output for tile generation
-- **GPU (Vello)** — scene graph handed to a caller-supplied wgpu renderer. Point and polygon labels draw as glyph runs, line labels do not
+- **Raster (RGBA pixels)**: direct pixel buffer output for tile generation
+- **GPU (Vello)**: scene graph handed to a caller-supplied wgpu renderer. Point and polygon labels draw as glyph runs, line labels do not
 
 `Renderer` takes no DPI or scale factor. You can allocate a larger pixel buffer, but nothing scales stroke widths or symbol sizes with it, so a 1px line is still 1px at 600 DPI.
 
 ### Input Formats
-- **Mapbox Vector Tiles (MVT/PBF)** — protobuf decoder with `thiserror` its only dependency, geometry command parsing, zigzag coordinate decoding, attribute extraction
-- **Esri drawingInfo** (`jung-esri`), translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, esriPMS/esriPFS picture symbols that carry their image inline as base64, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, picture symbols also come back as named data uri images the consumer registers at the declared pixel size, and whatever cannot be reproduced (picture symbols that only name a url, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) comes back in a structured loss list naming the esri value it gave up on
-- **GeoJSON** (`jung_core::geojson::parse_geojson_geometry`), read by both front doors, so `jung-cli` and `jung-wasm` accept every geometry type: Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon and GeometryCollection. A GeometryCollection renders as one feature per member, each carrying the properties of the feature it came from. A polygon's first ring is the exterior and the rest are holes, and ordinates past the second are dropped. A geometry that does not parse fails the whole input with the feature's index in the message
+- **Mapbox Vector Tiles (MVT/PBF)**: protobuf decoder with `thiserror` its only dependency, geometry command parsing, zigzag coordinate decoding, attribute extraction
+- **Esri drawingInfo** (`jung-esri`): translates the symbology an ArcGIS FeatureServer layer publishes into Mapbox GL style layers: simple, uniqueValue and classBreaks renderers, esriSMS/esriSLS/esriSFS symbols, esriPMS/esriPFS picture symbols that carry their image inline as base64, and the first labelingInfo class. Sizes convert from points to pixels at 96 dpi and esri color arrays become `rgba()` strings. Layers come out as raw JSON so a server can hand them straight to MapLibre, picture symbols also come back as named data uri images the consumer registers at the declared pixel size, and whatever cannot be reproduced (picture symbols that only name a url, arcade label expressions, visual variables, hatch fill patterns, non circle marker shapes) is listed in `Translation::losses` by its esri name
+- **GeoJSON** (`jung_core::geojson::parse_geojson_geometry`): used by both `jung-cli` and `jung-wasm`, which accept every geometry type: Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon and GeometryCollection. A GeometryCollection renders as one feature per member, each carrying the properties of the feature it came from. A polygon's first ring is the exterior and the rest are holes, and ordinates past the second are dropped. A geometry that does not parse fails the whole input with the feature's index in the message
 
 Features carry their properties, so `{property}` label tokens and data-driven expressions work, except for array and object members, which are dropped as nothing can read them.
 
 ### Expression Engine
-- **Mapbox GL Compatible** — full expression language: `get`, `has`, `zoom`, comparison, logical, math, string, case/match, coalesce, interpolate, step
-- **Custom Functions** — a standalone user-defined function registry with built-ins: `clamp`, `lerp`, `pow`, `sqrt`, `log`, `log10`, `len`, `contains`, `if_null`. It is not wired into style parsing: no style expression can call a registered function, and `evaluate_with_functions` discards the registry it is given. Call the registry directly from your own code
-- **StyleValue&lt;T&gt;** — expressions or literals for any style property, enabling fully data-driven maps
+- **Mapbox GL expressions**: the operators listed under [Expression Operators](#expression-operators), a subset of the Mapbox GL expression language
+- **Custom Functions**: a standalone user-defined function registry with built-ins: `clamp`, `lerp`, `pow`, `sqrt`, `log`, `log10`, `len`, `contains`, `if_null`. It is not wired into style parsing: no style expression can call a registered function, and `evaluate_with_functions` discards the registry it is given. Call the registry directly from your own code
+- **`StyleValue<T>`**: an expression or a literal, for every property marked data-driven under [Style Properties](#style-properties)
 
 ## Architecture
 
@@ -88,7 +88,7 @@ Features carry their properties, so `{property}` label tokens and data-driven ex
 | `jung-style` | Style specification parser (Mapbox GL JSON), expression engine, custom functions |
 | `jung-mvt` | Mapbox Vector Tile decoder, geometry in tile units |
 | `jung-esri` | Esri `drawingInfo` to Mapbox GL style translator, with a loss report |
-| `jung-vello` | GPU-accelerated rendering backend via Vello/wgpu |
+| `jung-vello` | Builds a `vello::Scene` for the caller to render with wgpu |
 | `jung-wasm` | WebAssembly bindings for browser-side rendering |
 | `jung-cli` | Command-line tool for batch rendering |
 
@@ -96,57 +96,61 @@ Features carry their properties, so `{property}` label tokens and data-driven ex
 
 ```
 jung-core/
-├── renderer.rs       — Main render orchestration, pixel buffers, bbox
-├── geometry.rs       — Point, Geometry, Feature types
-├── geojson.rs        — GeoJSON geometry parsing, one geometry per collection member
-├── line.rs           — Line rendering with caps, joins, dash patterns
-├── polygon.rs        — Polygon fill and stroke
-├── antialias.rs      — Anti-aliased lines, circles, polygons (Wu/distance)
-├── marker.rs         — Icon/sprite rendering and blitting
-├── symbols.rs        — Built-in vector symbol library (16 icons)
-├── text.rs           — TrueType/OTF font rasterization
-├── curved_label.rs   — Text along line geometries
-├── mvt.rs            — jung-mvt tiles normalised into engine coordinates
-├── classification.rs — Data classification and color ramps
-├── clustering.rs     — Point clustering (grid, hierarchical, DBSCAN)
-├── heatmap.rs        — Kernel density heatmap
-├── temporal.rs       — Time-based animation and trajectories
-├── extrusion.rs      — Pseudo-3D building rendering
-├── milstd2525.rs     — MIL-STD-2525 military symbology
-├── maritime.rs       — S-52/S-57 nautical chart symbology
-├── topographic.rs    — Contours, hillshade, hypsometric tinting
-├── ogc.rs            — OGC WKT/WKB, filter predicates, Simple Features ops
-├── sld.rs            — SLD/SE 1.1 XML import and export
-├── rules.rs          — Rule-based cascading style engine
-├── tiling.rs         — XYZ slippy-map tile addressing and per-tile filtering
+├── renderer.rs         Main render orchestration, pixel buffers, bbox
+├── geometry.rs         Point, Geometry, Feature types
+├── geojson.rs          GeoJSON geometry parsing, one geometry per collection member
+├── line.rs             Line rendering with caps, joins, dash patterns
+├── polygon.rs          Polygon fill and stroke
+├── antialias.rs        Anti-aliased lines, circles, polygons (Wu/distance)
+├── marker.rs           Icon/sprite rendering and blitting
+├── symbols.rs          Built-in vector symbol library (16 icons)
+├── text.rs             TrueType/OTF font rasterization
+├── curved_label.rs     Text along line geometries
+├── mvt.rs              jung-mvt tiles normalised into engine coordinates
+├── classification.rs   Data classification and color ramps
+├── clustering.rs       Point clustering (grid, hierarchical, DBSCAN)
+├── heatmap.rs          Kernel density heatmap
+├── temporal.rs         Time-based animation and trajectories
+├── extrusion.rs        Pseudo-3D building rendering
+├── milstd2525.rs       MIL-STD-2525 military symbology
+├── maritime.rs         S-52/S-57 nautical chart symbology
+├── topographic.rs      Contours, hillshade, hypsometric tinting
+├── ogc.rs              OGC WKT/WKB, filter predicates, Simple Features ops
+├── sld.rs              SLD/SE 1.1 XML import and export
+├── rules.rs            Rule-based cascading style engine
+├── tiling.rs           XYZ slippy-map tile addressing and per-tile filtering
 │                       (no clipping: a feature is kept only if one of its
 │                        vertices lies inside the tile, so a line crossing a
 │                        tile without a vertex in it is dropped)
-├── label_priority.rs — Priority-ordered label placement with a deconfliction grid
-└── layout.rs         — Serde model of a page layout (elements, paper sizes).
+├── label_priority.rs   Priority-ordered label placement with a deconfliction grid
+└── layout.rs           Serde model of a page layout (elements, paper sizes).
                         Nothing renders it
 
 jung-vello/
-└── lib.rs            — Vello GPU scene builder, geometry and glyph runs
+└── lib.rs              Vello GPU scene builder, geometry and glyph runs
 
 jung-mvt/
-└── lib.rs            — Mapbox Vector Tile protobuf decoder
+└── lib.rs              Mapbox Vector Tile protobuf decoder
 
 jung-style/
-├── expr.rs           — Expression AST, evaluation, StyleValue<T>
-├── functions.rs      — Custom function registry
-└── parse.rs          — JSON style parser (Mapbox GL compatible)
+├── expr.rs             Expression AST, evaluation, StyleValue<T>
+├── functions.rs        Custom function registry
+└── parse.rs            JSON style parser (a Mapbox GL subset)
 
 jung-esri/
-├── convert.rs        — Esri colors, point to pixel sizes
-├── symbol.rs         — esriSMS/esriSLS/esriSFS and esriPMS/esriPFS symbols to paint properties
-├── label.rs          — labelingInfo to a symbol layer
-└── lib.rs            — Renderer translation, layer assembly, image names, loss list
+├── convert.rs          Esri colors, point to pixel sizes
+├── symbol.rs           esriSMS/esriSLS/esriSFS and esriPMS/esriPFS symbols to paint properties
+├── label.rs            labelingInfo to a symbol layer
+└── lib.rs              Renderer translation, layer assembly, image names, loss list
 ```
 
 ## Quick Start
 
 ### CLI Usage
+
+`cargo install --path crates/jung-cli` builds the `jung` binary. Tagged releases attach it
+for Linux and macOS on x86_64 and aarch64. The output file is raw RGBA, `width * height * 4`
+bytes with no image header. Without `--bbox` the bbox is the extent of the input features.
 
 ```bash
 # Render a GeoJSON file with a style
@@ -324,7 +328,7 @@ feature without it draws no label.
 
 ## Style Specification
 
-Jung uses a Mapbox GL-compatible style format:
+Jung reads a subset of the Mapbox GL style format:
 
 ```json
 {
@@ -363,7 +367,9 @@ Jung uses a Mapbox GL-compatible style format:
 
 ### Style Properties
 
-The Block column is the style-layer object the property deserializes from. A property put in the wrong block is ignored silently.
+The Block column is the style-layer object the property deserializes from. A property put in the wrong block, or one not in this table, is ignored silently.
+
+Every layer draws every feature. A layer's `source` is read but never used for matching, and there is no layer `type` or `filter`. To style kinds of feature differently, branch on `["geometry-type"]` or a property with `case` or `match`. `circle-color` fills points only when the layer has no `fill-color`.
 
 | Property | Block | Type | Data-Driven | Description |
 |----------|-------|------|:-----------:|-------------|
@@ -419,27 +425,26 @@ Labels need a font: `Renderer::with_fonts`, since jung embeds none. Without one,
 # Build all crates
 cargo build --all
 
-# Run tests (340 tests)
+# Run tests
 cargo test --all
 
 # Clippy lint check
 cargo clippy --all-targets --all-features -- -D warnings
 
 # Build WASM (requires wasm-pack)
-cd crates/jung-wasm
-wasm-pack build --target web
+wasm-pack build crates/jung-wasm --target web
 ```
 
 ## Integration with GeoLang Ecosystem
 
 Jung is a library, not a compose service.
 
-- **[Ptolemy](https://github.com/GeoLang/ptolemy)** uses `jung-esri` to translate an ArcGIS `drawingInfo` into Mapbox GL style layers on `GET /style`.
+- **[Ptolemy](https://github.com/GeoLang/ptolemy)** uses `jung-esri` to translate an ArcGIS `drawingInfo` into Mapbox GL style layers on `GET /datasets/{id}/style`.
 - **[TerraVista](https://github.com/GeoLang/terravista)** uses `jung-mvt` to decode vector tiles.
-- **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind an optional feature; the platform deploy does not enable it.
+- **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind its optional `vello` feature, pinned to jung `v0.1.0`. The platform deploy does not enable it.
 - **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
-`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, layout, SLD) are library code with their own tests that nothing on the default render path calls. Two `ogc` functions are called from outside: `jung-cli` computes its default bbox with `envelope`, and `jung-vello` places polygon labels with `polygon_centroid`. SVG output and print furniture are gone.
+`Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, layout, SLD) are library code with their own tests that nothing on the default render path calls. Two `ogc` functions are called from outside: `jung-cli` computes its default bbox with `envelope`, and `jung-vello` places polygon labels with `polygon_centroid`.
 
 ## License
 
