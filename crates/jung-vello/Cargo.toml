@@ -10,4 +10,4 @@ authors = ["GeoLang <tiletopia@proton.me>"]
 jung-core = { path = "../jung-core" }
 jung-style = { path = "../jung-style" }
 skrifa = "0.42"
-vello = "0.9"
+vello = "0.10"
