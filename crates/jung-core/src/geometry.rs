@@ -26,13 +26,28 @@ pub struct PolygonGeom {
     pub holes: Vec<Vec<Point>>,
 }
 
-use jung_style::PropertyValue;
+use jung_style::{EvalContext, PropertyValue};
 
 /// A geospatial feature with geometry and attributes.
 #[derive(Debug, Clone)]
 pub struct Feature {
     pub geometry: Geometry,
     pub properties: std::collections::HashMap<String, PropertyValue>,
+}
+
+impl Feature {
+    pub fn eval_context(&self, zoom: f64) -> EvalContext<'_> {
+        let geometry_type = match &self.geometry {
+            Geometry::Point(_) | Geometry::MultiPoint(_) => "Point",
+            Geometry::LineString(_) | Geometry::MultiLineString(_) => "LineString",
+            Geometry::Polygon { .. } | Geometry::MultiPolygon(_) => "Polygon",
+        };
+        EvalContext {
+            properties: &self.properties,
+            zoom,
+            geometry_type,
+        }
+    }
 }
 
 #[cfg(test)]

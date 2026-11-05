@@ -145,6 +145,18 @@ impl StyleValue<String> {
     }
 }
 
+pub fn resolve_color(value: &Option<StyleValue<Color>>, ctx: &EvalContext) -> Option<Color> {
+    value
+        .as_ref()
+        .and_then(|style_value| style_value.resolve(ctx))
+}
+
+pub fn resolve_f32(value: &Option<StyleValue<f32>>, ctx: &EvalContext) -> Option<f32> {
+    value
+        .as_ref()
+        .and_then(|style_value| style_value.resolve(ctx))
+}
+
 /// Expression AST node — Mapbox GL expression specification.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {

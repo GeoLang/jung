@@ -1,7 +1,7 @@
 use crate::geometry::Point;
 use crate::line::{LineParams, render_line};
 use crate::renderer::{BBox, PixelBuffer};
-use jung_style::{Color, EvalContext, Layer, LineCap, StyleValue};
+use jung_style::{Color, EvalContext, Layer, LineCap, resolve_color, resolve_f32};
 
 /// Render a filled polygon (exterior ring with optional holes).
 #[allow(clippy::too_many_arguments)]
@@ -19,23 +19,19 @@ pub fn render_polygon(
         return;
     }
 
-    let fill_color = layer
-        .fill_color
-        .as_ref()
-        .and_then(|sv| sv.resolve(ctx))
-        .unwrap_or(Color::rgba(0, 0, 0, 0));
+    let fill_color = resolve_color(&layer.fill_color, ctx).unwrap_or(Color::rgba(0, 0, 0, 0));
 
     // Convert to screen coordinates
     let ext_screen: Vec<(f64, f64)> = exterior
         .iter()
-        .map(|p| map_to_screen(p, bbox, canvas_width, canvas_height))
+        .map(|p| bbox.map_to_screen(p, canvas_width, canvas_height))
         .collect();
 
     let holes_screen: Vec<Vec<(f64, f64)>> = holes
         .iter()
         .map(|hole| {
             hole.iter()
-                .map(|p| map_to_screen(p, bbox, canvas_width, canvas_height))
+                .map(|p| bbox.map_to_screen(p, canvas_width, canvas_height))
                 .collect()
         })
         .collect();
@@ -46,7 +42,7 @@ pub fn render_polygon(
     }
 
     // Stroke the outline
-    if let Some(stroke_color) = layer.stroke_color.as_ref().and_then(|sv| sv.resolve(ctx)) {
+    if let Some(stroke_color) = resolve_color(&layer.stroke_color, ctx) {
         let width = resolve_f32(&layer.stroke_width, ctx).unwrap_or(1.0);
         if width > 0.0 && stroke_color.a > 0 {
             let params = LineParams {
@@ -66,16 +62,6 @@ pub fn render_polygon(
             }
         }
     }
-}
-
-fn resolve_f32(val: &Option<StyleValue<f32>>, ctx: &EvalContext) -> Option<f32> {
-    val.as_ref().and_then(|sv| sv.resolve(ctx))
-}
-
-fn map_to_screen(p: &Point, bbox: &BBox, width: u32, height: u32) -> (f64, f64) {
-    let x = (p.x - bbox.min_x) / (bbox.max_x - bbox.min_x) * width as f64;
-    let y = (bbox.max_y - p.y) / (bbox.max_y - bbox.min_y) * height as f64;
-    (x, y)
 }
 
 /// Scanline fill using even-odd rule, supporting holes.
@@ -200,7 +186,7 @@ fn blend_pixel(buffer: &mut PixelBuffer, x: u32, y: u32, color: Color) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jung_style::{IconAnchor, LineCap, LineJoin, StyleValue};
+    use jung_style::StyleValue;
     use std::collections::HashMap;
 
     fn test_bbox() -> BBox {
@@ -215,25 +201,8 @@ mod tests {
     fn make_layer(fill: Color) -> Layer {
         Layer {
             id: "test".to_string(),
-            source: None,
             fill_color: Some(StyleValue::Literal(fill)),
-            stroke_color: None,
-            stroke_width: None,
-            line_cap: LineCap::Butt,
-            line_join: LineJoin::Miter,
-            line_dasharray: None,
-            line_offset: None,
-            line_opacity: None,
-            point_radius: None,
-            icon_image: None,
-            icon_size: None,
-            icon_rotate: None,
-            icon_anchor: IconAnchor::Center,
-            icon_offset: None,
-            font_family: None,
-            font_size: None,
-            text_field: None,
-            text_color: None,
+            ..Default::default()
         }
     }
 

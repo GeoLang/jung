@@ -24,7 +24,7 @@
 use jung_core::geometry::{Feature, Geometry, Point};
 use jung_core::ogc::polygon_centroid;
 use jung_core::renderer::{BBox, DEFAULT_TEXT_COLOR, DEFAULT_TEXT_SIZE_PX, expand_property_tokens};
-use jung_style::{Color, EvalContext, Layer, Style, StyleValue};
+use jung_style::{Color, EvalContext, Layer, Style, resolve_color, resolve_f32};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 use vello::kurbo::{Affine, BezPath, Circle, Stroke};
@@ -87,11 +87,7 @@ impl SceneBuilder {
     }
 
     fn render_feature(&self, scene: &mut Scene, layer: &Layer, feature: &Feature) {
-        let ctx = EvalContext {
-            properties: &feature.properties,
-            zoom: 10.0,
-            geometry_type: geometry_type_str(&feature.geometry),
-        };
+        let ctx = feature.eval_context(10.0);
 
         match &feature.geometry {
             Geometry::Point(p) => self.render_point(scene, layer, &ctx, *p),
@@ -137,11 +133,7 @@ impl SceneBuilder {
         let Ok(font_ref) = FontRef::from_index(font.data.as_ref(), font.index) else {
             return;
         };
-        let color = layer
-            .text_color
-            .as_ref()
-            .and_then(|sv| sv.resolve(ctx))
-            .unwrap_or(DEFAULT_TEXT_COLOR);
+        let color = resolve_color(&layer.text_color, ctx).unwrap_or(DEFAULT_TEXT_COLOR);
 
         for anchor in label_anchors(&feature.geometry) {
             let (screen_x, screen_y) = self.map_to_screen(&anchor);
@@ -161,11 +153,7 @@ impl SceneBuilder {
         let (sx, sy) = self.map_to_screen(&point);
         let radius = resolve_f32(&layer.point_radius, ctx).unwrap_or(5.0) as f64;
 
-        let fill_color = layer
-            .fill_color
-            .as_ref()
-            .and_then(|sv| sv.resolve(ctx))
-            .unwrap_or(Color::rgb(0, 0, 0));
+        let fill_color = resolve_color(&layer.fill_color, ctx).unwrap_or(Color::rgb(0, 0, 0));
 
         let circle = Circle::new((sx, sy), radius);
         scene.fill(
@@ -184,11 +172,8 @@ impl SceneBuilder {
 
         let path = self.points_to_path(points);
 
-        let stroke_color = layer
-            .stroke_color
-            .as_ref()
-            .and_then(|sv| sv.resolve(ctx))
-            .or_else(|| layer.fill_color.as_ref().and_then(|sv| sv.resolve(ctx)))
+        let stroke_color = resolve_color(&layer.stroke_color, ctx)
+            .or_else(|| resolve_color(&layer.fill_color, ctx))
             .unwrap_or(Color::rgb(0, 0, 0));
 
         let width = resolve_f32(&layer.stroke_width, ctx).unwrap_or(1.0) as f64;
@@ -240,11 +225,7 @@ impl SceneBuilder {
         }
 
         // Fill
-        let fill_color = layer
-            .fill_color
-            .as_ref()
-            .and_then(|sv| sv.resolve(ctx))
-            .unwrap_or(Color::rgba(0, 0, 0, 0));
+        let fill_color = resolve_color(&layer.fill_color, ctx).unwrap_or(Color::rgba(0, 0, 0, 0));
 
         if fill_color.a > 0 {
             scene.fill(
@@ -257,7 +238,7 @@ impl SceneBuilder {
         }
 
         // Stroke
-        if let Some(stroke_color) = layer.stroke_color.as_ref().and_then(|sv| sv.resolve(ctx)) {
+        if let Some(stroke_color) = resolve_color(&layer.stroke_color, ctx) {
             let width = resolve_f32(&layer.stroke_width, ctx).unwrap_or(1.0) as f64;
             if width > 0.0 && stroke_color.a > 0 {
                 let stroke = Stroke::new(width);
@@ -273,9 +254,7 @@ impl SceneBuilder {
     }
 
     fn map_to_screen(&self, p: &Point) -> (f64, f64) {
-        let x = (p.x - self.bbox.min_x) / (self.bbox.max_x - self.bbox.min_x) * self.width as f64;
-        let y = (self.bbox.max_y - p.y) / (self.bbox.max_y - self.bbox.min_y) * self.height as f64;
-        (x, y)
+        self.bbox.map_to_screen(p, self.width, self.height)
     }
 
     fn points_to_path(&self, points: &[Point]) -> BezPath {
@@ -352,23 +331,11 @@ fn to_vello_color(c: Color) -> vello::peniko::Color {
     ])
 }
 
-fn resolve_f32(val: &Option<StyleValue<f32>>, ctx: &EvalContext) -> Option<f32> {
-    val.as_ref().and_then(|sv| sv.resolve(ctx))
-}
-
-fn geometry_type_str(geom: &Geometry) -> &'static str {
-    match geom {
-        Geometry::Point(_) | Geometry::MultiPoint(_) => "Point",
-        Geometry::LineString(_) | Geometry::MultiLineString(_) => "LineString",
-        Geometry::Polygon { .. } | Geometry::MultiPolygon(_) => "Polygon",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use jung_core::geometry::Feature;
-    use jung_style::{IconAnchor, LineCap, LineJoin};
+    use jung_style::StyleValue;
     use skrifa::outline::{DrawSettings, OutlinePen};
     use std::collections::HashMap;
     use std::ops::Range;
@@ -386,25 +353,8 @@ mod tests {
     fn make_layer(fill: Color) -> Layer {
         Layer {
             id: "test".to_string(),
-            source: None,
             fill_color: Some(StyleValue::Literal(fill)),
-            stroke_color: None,
-            stroke_width: None,
-            line_cap: LineCap::Butt,
-            line_join: LineJoin::Miter,
-            line_dasharray: None,
-            line_offset: None,
-            line_opacity: None,
-            point_radius: None,
-            icon_image: None,
-            icon_size: None,
-            icon_rotate: None,
-            icon_anchor: IconAnchor::Center,
-            icon_offset: None,
-            font_family: None,
-            font_size: None,
-            text_field: None,
-            text_color: None,
+            ..Default::default()
         }
     }
 

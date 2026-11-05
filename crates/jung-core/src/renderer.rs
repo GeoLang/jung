@@ -5,7 +5,7 @@ use crate::line::{LineParams, render_line};
 use crate::marker::{IconPlacement, SpriteAtlas, blit_icon_placed};
 use crate::polygon::render_polygon;
 use crate::text::{FontFace, FontSet};
-use jung_style::{Color, EvalContext, Layer, PropertyValue, Style, StyleValue};
+use jung_style::{Color, EvalContext, Layer, PropertyValue, Style, resolve_color, resolve_f32};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -45,6 +45,19 @@ pub struct BBox {
     pub min_y: f64,
     pub max_x: f64,
     pub max_y: f64,
+}
+
+impl BBox {
+    pub fn map_to_screen(
+        &self,
+        point: &Point,
+        canvas_width: u32,
+        canvas_height: u32,
+    ) -> (f64, f64) {
+        let x = (point.x - self.min_x) / (self.max_x - self.min_x) * canvas_width as f64;
+        let y = (self.max_y - point.y) / (self.max_y - self.min_y) * canvas_height as f64;
+        (x, y)
+    }
 }
 
 /// An RGBA pixel buffer (row-major, 4 bytes per pixel).
@@ -217,7 +230,7 @@ impl Renderer {
             };
 
             for feature in features {
-                let ctx = make_eval_context(feature, zoom);
+                let ctx = feature.eval_context(zoom);
                 let Some(template) = text_field.resolve(&ctx) else {
                     continue;
                 };
@@ -241,11 +254,13 @@ impl Renderer {
 
                 match &feature.geometry {
                     Geometry::Point(pt) => {
-                        collector.push_point(self.to_screen(pt, bbox), &text, &text_style);
+                        let screen = bbox.map_to_screen(pt, self.width, self.height);
+                        collector.push_point(screen, &text, &text_style);
                     }
                     Geometry::MultiPoint(pts) => {
                         for pt in pts {
-                            collector.push_point(self.to_screen(pt, bbox), &text, &text_style);
+                            let screen = bbox.map_to_screen(pt, self.width, self.height);
+                            collector.push_point(screen, &text, &text_style);
                         }
                     }
                     Geometry::LineString(pts) => {
@@ -290,10 +305,6 @@ impl Renderer {
         }
     }
 
-    fn to_screen(&self, pt: &Point, bbox: &BBox) -> (f64, f64) {
-        (self.map_x(pt.x, bbox), self.map_y(pt.y, bbox))
-    }
-
     fn render_feature_impl(
         &self,
         buffer: &mut PixelBuffer,
@@ -303,7 +314,7 @@ impl Renderer {
         zoom: f64,
         sprites: Option<&SpriteAtlas>,
     ) {
-        let ctx = make_eval_context(feature, zoom);
+        let ctx = feature.eval_context(zoom);
 
         match &feature.geometry {
             Geometry::Point(pt) => self.render_point(buffer, layer, pt, bbox, &ctx, sprites),
@@ -378,8 +389,7 @@ impl Renderer {
         ctx: &EvalContext,
         sprites: Option<&SpriteAtlas>,
     ) {
-        let px = self.map_x(pt.x, bbox);
-        let py = self.map_y(pt.y, bbox);
+        let (px, py) = bbox.map_to_screen(pt, self.width, self.height);
 
         // Try icon rendering first
         if let Some(icon) = layer
@@ -421,14 +431,6 @@ impl Renderer {
                 }
             }
         }
-    }
-
-    fn map_x(&self, x: f64, bbox: &BBox) -> f64 {
-        (x - bbox.min_x) / (bbox.max_x - bbox.min_x) * self.width as f64
-    }
-
-    fn map_y(&self, y: f64, bbox: &BBox) -> f64 {
-        (bbox.max_y - y) / (bbox.max_y - bbox.min_y) * self.height as f64
     }
 }
 
@@ -638,32 +640,10 @@ fn property_to_string(value: &PropertyValue) -> String {
     }
 }
 
-/// Create an EvalContext from a Feature for expression evaluation.
-fn make_eval_context<'a>(feature: &'a Feature, zoom: f64) -> EvalContext<'a> {
-    let geom_type = match &feature.geometry {
-        Geometry::Point(_) | Geometry::MultiPoint(_) => "Point",
-        Geometry::LineString(_) | Geometry::MultiLineString(_) => "LineString",
-        Geometry::Polygon { .. } | Geometry::MultiPolygon(_) => "Polygon",
-    };
-    EvalContext {
-        properties: &feature.properties,
-        zoom,
-        geometry_type: geom_type,
-    }
-}
-
-fn resolve_color(val: &Option<StyleValue<Color>>, ctx: &EvalContext) -> Option<Color> {
-    val.as_ref().and_then(|sv| sv.resolve(ctx))
-}
-
-fn resolve_f32(val: &Option<StyleValue<f32>>, ctx: &EvalContext) -> Option<f32> {
-    val.as_ref().and_then(|sv| sv.resolve(ctx))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use jung_style::{IconAnchor, LineCap, LineJoin, StyleValue};
+    use jung_style::{IconAnchor, StyleValue};
     use std::collections::HashMap;
 
     fn test_style() -> Style {
@@ -671,30 +651,14 @@ mod tests {
             name: "test".to_string(),
             layers: vec![Layer {
                 id: "points".to_string(),
-                source: None,
                 fill_color: Some(StyleValue::Literal(Color {
                     r: 255,
                     g: 0,
                     b: 0,
                     a: 255,
                 })),
-                stroke_color: None,
-                stroke_width: None,
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
                 point_radius: Some(StyleValue::Literal(3.0)),
-                icon_image: None,
-                icon_size: None,
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         }
     }
@@ -768,25 +732,9 @@ mod tests {
             name: "line-test".to_string(),
             layers: vec![Layer {
                 id: "lines".to_string(),
-                source: None,
-                fill_color: None,
                 stroke_color: Some(StyleValue::Literal(Color::rgb(0, 255, 0))),
                 stroke_width: Some(StyleValue::Literal(width)),
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
-                icon_image: None,
-                icon_size: None,
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         }
     }
@@ -898,25 +846,10 @@ mod tests {
             name: "poly-test".to_string(),
             layers: vec![Layer {
                 id: "polygons".to_string(),
-                source: None,
                 fill_color: Some(StyleValue::Literal(Color::rgb(0, 0, 255))),
                 stroke_color: Some(StyleValue::Literal(Color::rgb(255, 255, 0))),
                 stroke_width: Some(StyleValue::Literal(2.0)),
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
-                icon_image: None,
-                icon_size: None,
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         }
     }
@@ -963,25 +896,8 @@ mod tests {
             name: "hole-test".to_string(),
             layers: vec![Layer {
                 id: "polygons".to_string(),
-                source: None,
                 fill_color: Some(StyleValue::Literal(Color::rgb(255, 0, 0))),
-                stroke_color: None,
-                stroke_width: None,
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
-                icon_image: None,
-                icon_size: None,
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         };
         let bbox = BBox {
@@ -1079,7 +995,6 @@ mod tests {
             name: "data-driven".to_string(),
             layers: vec![Layer {
                 id: "polygons".to_string(),
-                source: None,
                 fill_color: Some(StyleValue::Expression(Expression::Case(
                     vec![(
                         Expression::Eq(
@@ -1090,23 +1005,7 @@ mod tests {
                     )],
                     Box::new(Expression::Literal(ExprValue::Color(Color::rgb(255, 0, 0)))),
                 ))),
-                stroke_color: None,
-                stroke_width: None,
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
-                icon_image: None,
-                icon_size: None,
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         };
         let bbox = BBox {
@@ -1185,8 +1084,6 @@ mod tests {
             name: "zoom-style".to_string(),
             layers: vec![Layer {
                 id: "lines".to_string(),
-                source: None,
-                fill_color: None,
                 stroke_color: Some(StyleValue::Literal(Color::rgb(255, 0, 0))),
                 stroke_width: Some(StyleValue::Expression(Expression::Interpolate {
                     interpolation: Interpolation::Linear,
@@ -1196,21 +1093,7 @@ mod tests {
                         (15.0, Expression::Literal(ExprValue::Number(10.0))),
                     ],
                 })),
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
-                icon_image: None,
-                icon_size: None,
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         };
         let bbox = BBox {
@@ -1259,25 +1142,9 @@ mod tests {
             name: "icon-test".to_string(),
             layers: vec![Layer {
                 id: "icons".to_string(),
-                source: None,
-                fill_color: None,
-                stroke_color: None,
-                stroke_width: None,
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
                 icon_image: Some(StyleValue::Literal("pin".to_string())),
                 icon_size: Some(StyleValue::Literal(1.0)),
-                icon_rotate: None,
-                icon_anchor: IconAnchor::Center,
-                icon_offset: None,
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         };
         let bbox = BBox {
@@ -1325,25 +1192,12 @@ mod tests {
             name: "icon-placement".to_string(),
             layers: vec![Layer {
                 id: "icons".to_string(),
-                source: None,
-                fill_color: None,
-                stroke_color: None,
-                stroke_width: None,
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                line_dasharray: None,
-                line_offset: None,
-                line_opacity: None,
-                point_radius: None,
                 icon_image: Some(StyleValue::Literal("pin".to_string())),
                 icon_size: Some(StyleValue::Literal(1.0)),
                 icon_rotate: Some(StyleValue::Literal(90.0)),
                 icon_anchor: IconAnchor::TopLeft,
                 icon_offset: Some([4.0, -3.0]),
-                font_family: None,
-                font_size: None,
-                text_field: None,
-                text_color: None,
+                ..Default::default()
             }],
         };
         let bbox = BBox {

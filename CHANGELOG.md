@@ -6,6 +6,12 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 2026-11-04: `jung-core` and `jung-vello` share their style and coordinate
+  code, with no change to rendered output. New public items: `BBox::map_to_screen`
+  and `Feature::eval_context` in `jung-core`, `resolve_color`, `resolve_f32` and
+  `Default` for `Layer` in `jung-style`.
+- 2026-11-04: CI and the release workflow call the reusable workflows in
+  `GeoLang/.github`. The `jung-<target>.tar.gz` archives are unchanged.
 - 2026-09-16: docs match the code. The README's build section says 340 tests,
   which is what `cargo test --all` lists, not 338. The docs page quick start
   builds the `features` vector it passes to `render`, so the snippet compiles.

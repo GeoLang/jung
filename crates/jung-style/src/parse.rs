@@ -73,7 +73,7 @@ pub enum IconAnchor {
 }
 
 /// A single symbology layer.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Layer {
     pub id: String,
     pub source: Option<String>,

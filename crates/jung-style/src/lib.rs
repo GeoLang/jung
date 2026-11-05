@@ -13,7 +13,7 @@ pub use parse::{Color, IconAnchor, Layer, LineCap, LineJoin, Style, StyleError, 
 
 pub use expr::{
     EvalContext, ExprValue, Expression, Interpolation, PropertyValue, StyleValue, evaluate,
-    parse_expression, properties_from_json,
+    parse_expression, properties_from_json, resolve_color, resolve_f32,
 };
 
 /// Public color parser for use by the expression evaluator.
