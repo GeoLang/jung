@@ -212,3 +212,151 @@ fn test_decoded_properties_are_the_encoded_properties() {
         ]
     );
 }
+
+fn encoded(features: Vec<MvtFeature>) -> Vec<u8> {
+    let layer = MvtLayer {
+        name: "edges".to_string(),
+        extent: DEFAULT_EXTENT,
+        features,
+    };
+    encode_tile(&[layer], BBOX)
+}
+
+fn round_trip(features: Vec<MvtFeature>) -> VectorLayer {
+    let mut tile = decode_tile(&encoded(features)).unwrap();
+    tile.layers.remove(0)
+}
+
+#[test]
+fn test_fractional_coordinates_round_to_the_nearest_tile_unit() {
+    let layer = round_trip(vec![feature(
+        MvtGeometry::Point(vec![[10.7, 4096.0 - 20.6], [-0.7, 4096.0 + 1.6]]),
+        &[],
+    )]);
+    assert_eq!(
+        layer.features[0].geometry,
+        TileGeometry::Points(vec![[11.0, 21.0], [-1.0, -2.0]])
+    );
+}
+
+#[test]
+fn test_line_points_that_quantize_together_are_written_once() {
+    let name = [("name", MvtValue::String("brook".into()))];
+    let with_repeats = feature(
+        MvtGeometry::LineString(vec![
+            vec![[0.0, 4096.0], [0.2, 4096.0], [1000.0, 4096.0]],
+            // both points land on tile unit (5, 4091)
+            vec![[5.2, 5.2], [5.4, 5.3]],
+        ]),
+        &name,
+    );
+    let without = feature(
+        MvtGeometry::LineString(vec![vec![[0.0, 4096.0], [1000.0, 4096.0]]]),
+        &name,
+    );
+    assert_eq!(encoded(vec![with_repeats]), encoded(vec![without]));
+}
+
+#[test]
+fn test_features_left_without_geometry_are_not_written() {
+    let brook = feature(
+        MvtGeometry::LineString(vec![vec![[0.0, 4096.0], [1000.0, 4096.0]]]),
+        &[("name", MvtValue::String("brook".into()))],
+    );
+    let features = vec![
+        feature(
+            MvtGeometry::Point(Vec::new()),
+            &[("empty", MvtValue::Bool(true))],
+        ),
+        brook.clone(),
+        feature(
+            MvtGeometry::LineString(vec![vec![[5.2, 5.2], [5.4, 5.3]]]),
+            &[("short", MvtValue::Int(2))],
+        ),
+        feature(
+            MvtGeometry::Polygon(vec![rfc_7946_polygons().swap_remove(1)]),
+            &[("tiny", MvtValue::Double(0.5))],
+        ),
+    ];
+    assert_eq!(encoded(features), encoded(vec![brook]));
+}
+
+#[test]
+fn test_geometry_past_the_coordinate_limit_is_clipped() {
+    // mvt 2.1 caps geometry deltas at 2^31 - 1
+    let coordinate_limit = 2f32.powi(30);
+    let far = 1e10;
+    let layer = round_trip(vec![
+        feature(
+            MvtGeometry::Point(vec![[100.0, 3996.0], [far, 3996.0]]),
+            &[],
+        ),
+        // in tile units the line runs along y = 2048 + x / 2
+        feature(
+            MvtGeometry::LineString(vec![vec![
+                [-far, 2048.0 + far / 2.0],
+                [far, 2048.0 - far / 2.0],
+            ]]),
+            &[],
+        ),
+        feature(
+            MvtGeometry::Polygon(vec![polygon(
+                &[
+                    [-far, -far],
+                    [far, -far],
+                    [far, far],
+                    [-far, far],
+                    [-far, -far],
+                ],
+                &[],
+            )]),
+            &[],
+        ),
+    ]);
+
+    assert_eq!(
+        layer.features[0].geometry,
+        TileGeometry::Points(vec![[100.0, 100.0]])
+    );
+
+    let TileGeometry::Lines(lines) = &layer.features[1].geometry else {
+        panic!("not a line: {:?}", layer.features[1].geometry);
+    };
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    let [start, end] = lines[0][..] else {
+        panic!("not two points: {lines:?}");
+    };
+    assert!(start[0] < 0.0 && end[0] > 4096.0, "{lines:?}");
+    for point in [start, end] {
+        assert!(point[0].abs() <= coordinate_limit, "{lines:?}");
+        // decoded coordinates are f32, which steps by 128 near 2^30
+        assert!(
+            (point[1] - 2048.0 - point[0] / 2.0).abs() < 256.0,
+            "{lines:?}"
+        );
+    }
+
+    let TileGeometry::Polygons(polygons) = &layer.features[2].geometry else {
+        panic!("not a polygon: {:?}", layer.features[2].geometry);
+    };
+    assert_eq!(polygons.len(), 1, "{polygons:?}");
+    let exterior = &polygons[0].exterior;
+    assert!(
+        exterior
+            .iter()
+            .flatten()
+            .all(|coordinate| coordinate.abs() <= coordinate_limit),
+        "{exterior:?}"
+    );
+    for axis in 0..2 {
+        let coordinates = || exterior.iter().map(|vertex| vertex[axis]);
+        assert!(
+            coordinates().fold(f32::INFINITY, f32::min) < 0.0,
+            "{exterior:?}"
+        );
+        assert!(
+            coordinates().fold(f32::NEG_INFINITY, f32::max) > 4096.0,
+            "{exterior:?}"
+        );
+    }
+}

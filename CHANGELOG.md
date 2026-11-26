@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- 2026-11-26: `jung-mvt` encoder rounds tile coordinates to the nearest unit
+  instead of truncating toward zero, and clips geometry at 2^30 - 1 tile units
+  so every geometry delta fits the 2^31 - 1 the MVT spec allows. Repeated
+  points in a line are written once, line parts left with one point are
+  dropped, and a feature left with no geometry is not written. Input already in
+  whole tile units, with no repeated line points, gives the same bytes as
+  before.
 - 2026-11-04: `jung-core` and `jung-vello` share their style and coordinate
   code, with no change to rendered output. New public items: `BBox::map_to_screen`
   and `Feature::eval_context` in `jung-core`, `resolve_color`, `resolve_f32` and

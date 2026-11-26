@@ -67,12 +67,23 @@ fn encode_layer(layer: &MvtLayer, bbox: [f64; 4]) -> Vec<u8> {
     write_varint(&mut buf, layer.name.len() as u64);
     buf.extend_from_slice(layer.name.as_bytes());
 
+    let encoded_features: Vec<(&MvtFeature, Vec<u32>)> = layer
+        .features
+        .iter()
+        .map(|feature| {
+            let commands = encode_geometry(&feature.geometry, layer.extent, bbox);
+            (feature, commands)
+        })
+        // mvt 2.1 requires a geometry in every feature
+        .filter(|(_, commands)| !commands.is_empty())
+        .collect();
+
     let mut keys: Vec<String> = Vec::new();
     let mut key_index: HashMap<String, u32> = HashMap::new();
     let mut values: Vec<MvtValue> = Vec::new();
     let mut value_index: HashMap<u64, u32> = HashMap::new();
 
-    for feature in &layer.features {
+    for (feature, _) in &encoded_features {
         for (k, v) in &feature.properties {
             if let std::collections::hash_map::Entry::Vacant(e) = key_index.entry(k.clone()) {
                 e.insert(keys.len() as u32);
@@ -86,8 +97,8 @@ fn encode_layer(layer: &MvtLayer, bbox: [f64; 4]) -> Vec<u8> {
         }
     }
 
-    for feature in &layer.features {
-        let feature_bytes = encode_feature(feature, layer.extent, bbox, &key_index, &value_index);
+    for (feature, commands) in &encoded_features {
+        let feature_bytes = encode_feature(feature, commands, &key_index, &value_index);
         write_tag(&mut buf, LAYER_FEATURES, WIRE_BYTES);
         write_varint(&mut buf, feature_bytes.len() as u64);
         buf.extend_from_slice(&feature_bytes);
@@ -114,8 +125,7 @@ fn encode_layer(layer: &MvtLayer, bbox: [f64; 4]) -> Vec<u8> {
 
 fn encode_feature(
     feature: &MvtFeature,
-    extent: u32,
-    bbox: [f64; 4],
+    commands: &[u32],
     key_index: &HashMap<String, u32>,
     value_index: &HashMap<u64, u32>,
 ) -> Vec<u8> {
@@ -151,9 +161,8 @@ fn encode_feature(
     write_tag(&mut buf, FEATURE_TYPE, WIRE_VARINT);
     write_varint(&mut buf, geom_type);
 
-    let commands = encode_geometry(&feature.geometry, extent, bbox);
     let mut geom_bytes = Vec::new();
-    for cmd in &commands {
+    for cmd in commands {
         write_varint(&mut geom_bytes, u64::from(*cmd));
     }
     write_tag(&mut buf, FEATURE_GEOMETRY, WIRE_BYTES);
@@ -163,17 +172,113 @@ fn encode_feature(
     buf
 }
 
+// mvt 2.1 caps geometry deltas at 2^31 - 1
+const TILE_COORDINATE_LIMIT: f64 = (i32::MAX / 2) as f64;
+
+const COORDINATE_BOUNDS: [(usize, f64); 4] = [
+    (0, -TILE_COORDINATE_LIMIT),
+    (0, TILE_COORDINATE_LIMIT),
+    (1, -TILE_COORDINATE_LIMIT),
+    (1, TILE_COORDINATE_LIMIT),
+];
+
+fn within_bound(point: [f64; 2], (axis, bound): (usize, f64)) -> bool {
+    if bound < 0.0 {
+        point[axis] >= bound
+    } else {
+        point[axis] <= bound
+    }
+}
+
+fn within_coordinate_limit(point: [f64; 2]) -> bool {
+    COORDINATE_BOUNDS
+        .iter()
+        .all(|&bound| within_bound(point, bound))
+}
+
+fn boundary_crossing(from: [f64; 2], to: [f64; 2], (axis, bound): (usize, f64)) -> [f64; 2] {
+    let t = (bound - from[axis]) / (to[axis] - from[axis]);
+    let mut crossing = [
+        from[0] + t * (to[0] - from[0]),
+        from[1] + t * (to[1] - from[1]),
+    ];
+    crossing[axis] = bound;
+    crossing
+}
+
+fn clip_line(line: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
+    let mut parts = vec![line.to_vec()];
+    for bound in COORDINATE_BOUNDS {
+        let mut clipped_parts = Vec::new();
+        for part in &parts {
+            let mut piece: Vec<[f64; 2]> = part
+                .first()
+                .copied()
+                .filter(|&first| within_bound(first, bound))
+                .into_iter()
+                .collect();
+            for segment in part.windows(2) {
+                let (previous, current) = (segment[0], segment[1]);
+                let current_inside = within_bound(current, bound);
+                if within_bound(previous, bound) != current_inside {
+                    piece.push(boundary_crossing(previous, current, bound));
+                }
+                if current_inside {
+                    piece.push(current);
+                } else if !piece.is_empty() {
+                    clipped_parts.push(std::mem::take(&mut piece));
+                }
+            }
+            if !piece.is_empty() {
+                clipped_parts.push(piece);
+            }
+        }
+        parts = clipped_parts;
+    }
+    parts
+}
+
+fn clip_ring(ring: &[[f64; 2]]) -> Vec<[f64; 2]> {
+    let mut clipped = ring.to_vec();
+    for bound in COORDINATE_BOUNDS {
+        let Some(&last) = clipped.last() else {
+            break;
+        };
+        let mut previous = last;
+        let mut kept = Vec::new();
+        for &current in &clipped {
+            let current_inside = within_bound(current, bound);
+            if within_bound(previous, bound) != current_inside {
+                kept.push(boundary_crossing(previous, current, bound));
+            }
+            if current_inside {
+                kept.push(current);
+            }
+            previous = current;
+        }
+        clipped = kept;
+    }
+    clipped
+}
+
+fn rounded(points: &[[f64; 2]]) -> Vec<[i32; 2]> {
+    points
+        .iter()
+        .map(|point| [point[0].round() as i32, point[1].round() as i32])
+        .collect()
+}
+
 fn encode_geometry(geom: &MvtGeometry, extent: u32, bbox: [f64; 4]) -> Vec<u32> {
     let ext = f64::from(extent);
     let bw = bbox[2] - bbox[0];
     let bh = bbox[3] - bbox[1];
-    let tile_points = |points: &[[f64; 2]]| -> Vec<[i32; 2]> {
+    let tile_path = |points: &[[f64; 2]]| -> Vec<[f64; 2]> {
         points
             .iter()
             .map(|point| {
                 [
-                    ((point[0] - bbox[0]) / bw * ext) as i32,
-                    ((bbox[3] - point[1]) / bh * ext) as i32,
+                    (point[0] - bbox[0]) / bw * ext,
+                    (bbox[3] - point[1]) / bh * ext,
                 ]
             })
             .collect()
@@ -183,27 +288,37 @@ fn encode_geometry(geom: &MvtGeometry, extent: u32, bbox: [f64; 4]) -> Vec<u32> 
     let mut cursor = [0i32; 2];
     match geom {
         MvtGeometry::Point(points) => {
-            if points.is_empty() {
+            let kept: Vec<[f64; 2]> = tile_path(points)
+                .into_iter()
+                .filter(|&point| within_coordinate_limit(point))
+                .collect();
+            if kept.is_empty() {
                 return commands;
             }
-            commands.push(command_integer(MOVE_TO, points.len() as u32));
-            push_deltas(&mut commands, &mut cursor, &tile_points(points));
+            commands.push(command_integer(MOVE_TO, kept.len() as u32));
+            push_deltas(&mut commands, &mut cursor, &rounded(&kept));
         }
         MvtGeometry::LineString(lines) => {
-            for line in lines.iter().filter(|line| line.len() >= 2) {
-                push_path(&mut commands, &mut cursor, &tile_points(line));
+            for part in lines.iter().flat_map(|line| clip_line(&tile_path(line))) {
+                let mut path = rounded(&part);
+                path.dedup();
+                if path.len() >= 2 {
+                    push_path(&mut commands, &mut cursor, &path);
+                }
             }
         }
         MvtGeometry::Polygon(polygons) => {
+            let clipped_tile_ring = |ring: &[[f64; 2]], area_sign: Ordering| {
+                tile_ring(rounded(&clip_ring(&tile_path(ring))), area_sign)
+            };
             for polygon in polygons {
-                let Some(exterior) = tile_ring(tile_points(&polygon.exterior), Ordering::Greater)
-                else {
+                let Some(exterior) = clipped_tile_ring(&polygon.exterior, Ordering::Greater) else {
                     continue;
                 };
                 let holes = polygon
                     .holes
                     .iter()
-                    .filter_map(|hole| tile_ring(tile_points(hole), Ordering::Less));
+                    .filter_map(|hole| clipped_tile_ring(hole, Ordering::Less));
                 for ring in std::iter::once(exterior).chain(holes) {
                     push_path(&mut commands, &mut cursor, &ring);
                     commands.push(command_integer(CLOSE_PATH, 1));
