@@ -1,6 +1,6 @@
 //! # jung-mvt
 //!
-//! Mapbox Vector Tile decoding.
+//! Mapbox Vector Tile encoding and decoding.
 //!
 //! Decodes the protobuf of the [MVT spec v2](https://github.com/mapbox/vector-tile-spec)
 //! into layers, features, geometry and attributes. Coordinates stay in the
@@ -8,6 +8,12 @@
 //! tile on screen is a scale and a translate.
 
 use std::collections::HashMap;
+
+mod encode;
+
+pub use encode::{
+    MVT_MEDIA_TYPE, MvtFeature, MvtGeometry, MvtLayer, MvtPolygon, MvtValue, encode_tile,
+};
 
 /// A vector tile that cannot be decoded.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -96,6 +102,7 @@ pub fn decode_tile(data: &[u8]) -> Result<VectorTile, Error> {
 const TILE_LAYERS: u32 = 3;
 
 // Layer
+const LAYER_VERSION: u32 = 15;
 const LAYER_NAME: u32 = 1;
 const LAYER_FEATURES: u32 = 2;
 const LAYER_KEYS: u32 = 3;
@@ -103,6 +110,7 @@ const LAYER_VALUES: u32 = 4;
 const LAYER_EXTENT: u32 = 5;
 
 // Feature
+const FEATURE_ID: u32 = 1;
 const FEATURE_TAGS: u32 = 2;
 const FEATURE_TYPE: u32 = 3;
 const FEATURE_GEOMETRY: u32 = 4;
@@ -126,7 +134,7 @@ const MOVE_TO: u32 = 1;
 const LINE_TO: u32 = 2;
 const CLOSE_PATH: u32 = 7;
 
-const DEFAULT_EXTENT: u32 = 4096;
+pub const DEFAULT_EXTENT: u32 = 4096;
 
 fn decode_layer(data: &[u8]) -> Result<VectorLayer, Error> {
     let mut reader = PbfReader::new(data);

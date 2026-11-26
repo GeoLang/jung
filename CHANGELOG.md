@@ -18,6 +18,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- 2026-11-26: `jung-mvt` encodes tiles as well as decoding them. `encode_tile`
+  takes `MvtLayer`s of `MvtFeature`s in projected coordinates plus the tile's
+  bbox, and `MVT_MEDIA_TYPE` and `DEFAULT_EXTENT` are public. The encoder came
+  from `fenestra-core::mvt`, with one change: integer properties are written as
+  `sint_value`. Fenestra wrote zigzag-encoded integers into `int_value`, so MVT
+  readers saw 4 as 8 and -1 as 1. `thiserror` is still the only dependency.
+- 2026-11-26: `jung-mvt` encoder: `MvtGeometry::Polygon` holds `MvtPolygon`s,
+  each an exterior and its holes, in place of a flat ring list. Rings in either
+  winding are rewound after quantizing so exteriors have positive area and
+  holes negative in tile coordinates, as the spec requires. Rings left with
+  under three points or no area are dropped, and a dropped exterior drops its
+  holes. `MvtFeature::properties` is a `BTreeMap`, so a tile's bytes depend
+  only on its input.
 - `jung-core`: `geojson::parse_geojson_geometry` reads every GeoJSON geometry
   type. `jung-cli` and `jung-wasm` both call it, so lines and polygons render
   instead of being dropped, a GeometryCollection becomes one feature per member

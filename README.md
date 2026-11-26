@@ -48,6 +48,7 @@ Jung renders geospatial features with a Mapbox GL style into RGBA pixels, or int
 
 ### Output Formats
 - **Raster (RGBA pixels)**: direct pixel buffer output for tile generation
+- **Mapbox Vector Tiles (MVT/PBF)** (`jung_mvt::encode_tile`): writes layers of points, lines and polygons from projected coordinates and the tile's bbox, with string, float, double, int, uint and bool properties. Features are not clipped. Polygon rings in either winding are rewound after quantizing so exteriors have positive area and holes negative, as the spec requires, and rings left with under three points or no area are dropped, an exterior together with its holes. Properties are written in key order, so the same input gives the same bytes
 - **GPU (Vello)**: scene graph handed to a caller-supplied wgpu renderer. Point and polygon labels draw as glyph runs, line labels do not
 
 `Renderer` takes no DPI or scale factor. You can allocate a larger pixel buffer, but nothing scales stroke widths or symbol sizes with it, so a 1px line is still 1px at 600 DPI.
@@ -86,7 +87,7 @@ Features carry their properties, so `{property}` label tokens and data-driven ex
 |-------|-------------|
 | `jung-core` | Core rendering engine: geometry, symbology, labels, classification, OGC standards |
 | `jung-style` | Style specification parser (Mapbox GL JSON), expression engine, custom functions |
-| `jung-mvt` | Mapbox Vector Tile decoder, geometry in tile units |
+| `jung-mvt` | Mapbox Vector Tile encoder and decoder, decoded geometry in tile units |
 | `jung-esri` | Esri `drawingInfo` to Mapbox GL style translator, with a loss report |
 | `jung-vello` | Builds a `vello::Scene` for the caller to render with wgpu |
 | `jung-wasm` | WebAssembly bindings for browser-side rendering |
@@ -130,7 +131,8 @@ jung-vello/
 └── lib.rs              Vello GPU scene builder, geometry and glyph runs
 
 jung-mvt/
-└── lib.rs              Mapbox Vector Tile protobuf decoder
+├── lib.rs              Mapbox Vector Tile protobuf decoder
+└── encode.rs           Mapbox Vector Tile protobuf encoder
 
 jung-style/
 ├── expr.rs             Expression AST, evaluation, StyleValue<T>
@@ -441,7 +443,7 @@ Jung is a library, not a compose service.
 
 - **[Ptolemy](https://github.com/GeoLang/ptolemy)** uses `jung-esri` to translate an ArcGIS `drawingInfo` into Mapbox GL style layers on `GET /datasets/{id}/style`.
 - **[TerraVista](https://github.com/GeoLang/terravista)** uses `jung-mvt` to decode vector tiles.
-- **[Fenestra](https://github.com/GeoLang/fenestra)** can build a Vello scene behind its optional `vello` feature, pinned to jung `v0.1.0`. The platform deploy does not enable it.
+- **[Fenestra](https://github.com/GeoLang/fenestra)** encodes its OGC API vector tiles with `jung-mvt` from jung `master`. It can also build a Vello scene behind its optional `vello` feature, pinned to jung `v0.1.0`. The platform deploy does not enable that feature.
 - **[ViewTopia](https://github.com/GeoLang/viewtopia)** does not import `jung-wasm`. Client styling is MapLibre / Cesium.
 
 `Renderer` draws points, lines and polygons from a Mapbox GL style, with hard-edged integer rasterization, plus labels from the `text-*` properties when the caller supplies a font. The label path uses `text.rs`, `label_priority.rs` and `curved_label.rs`. The other `jung-core` modules (anti-aliasing, symbols, MIL-STD, maritime, topographic, heatmap, clustering, classification, temporal, extrusion, tiling, rules, layout, SLD) are library code with their own tests that nothing on the default render path calls. Two `ogc` functions are called from outside: `jung-cli` computes its default bbox with `envelope`, and `jung-vello` places polygon labels with `polygon_centroid`.

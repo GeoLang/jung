@@ -244,7 +244,7 @@
                 </div>
                 <div class="feature-card">
                     <h3>Vector Tiles (MVT)</h3>
-                    <p>Protobuf decoder for Mapbox Vector Tiles with <code>thiserror</code> its only dependency. Geometry command parsing, zigzag decoding, attribute extraction.</p>
+                    <p>Protobuf encoder and decoder for Mapbox Vector Tiles with <code>thiserror</code> its only dependency. Geometry command parsing, zigzag decoding, attribute extraction, and <code>encode_tile</code> for writing tiles.</p>
                 </div>
                 <div class="feature-card">
                     <h3>Esri drawingInfo</h3>
@@ -256,7 +256,7 @@
                 </div>
                 <div class="feature-card">
                     <h3>GeoLang Ecosystem</h3>
-                    <p>Ptolemy uses <code>jung-esri</code> to translate an ArcGIS <code>drawingInfo</code> into Mapbox GL style layers. TerraVista uses <code>jung-mvt</code> to decode vector tiles. Fenestra can build a Vello scene behind an optional feature the platform deploy does not enable. ViewTopia does not import <code>jung-wasm</code>, its client styling is MapLibre and Cesium.</p>
+                    <p>Ptolemy uses <code>jung-esri</code> to translate an ArcGIS <code>drawingInfo</code> into Mapbox GL style layers. TerraVista uses <code>jung-mvt</code> to decode vector tiles. Fenestra encodes its vector tiles with <code>jung-mvt</code>, and can build a Vello scene behind an optional feature the platform deploy does not enable. ViewTopia does not import <code>jung-wasm</code>, its client styling is MapLibre and Cesium.</p>
                 </div>
             </div>
         </section>

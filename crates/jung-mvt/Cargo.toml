@@ -1,6 +1,6 @@
 [package]
 name = "jung-mvt"
-description = "Mapbox Vector Tile decoder producing tile-unit geometry"
+description = "Mapbox Vector Tile encoder and decoder, decoded geometry in tile units"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
