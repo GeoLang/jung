@@ -21,7 +21,7 @@ Jung renders geospatial features with a Mapbox GL style into RGBA pixels, or int
 - **Curved Labels**: text placed along line geometries, per-character rotation, max angle rejection, repeat spacing
 
 ### Advanced Symbology
-- **Graduated/Classified**: equal interval, quantile, natural breaks (Fisher-Jenks), standard deviation, manual classification with color ramps
+- **Graduated/Classified**: equal interval, quantile, natural breaks (Fisher-Jenks), standard deviation, manual classification with color ramps, and `gdaldem color-relief` colour files (`ColorFile`, `ValueRamp`) with interpolated, exact or nearest stops, percent stops and an `nv` nodata colour
 - **Proportional Symbols**: Flannery scaling (perceptual), data-driven size mapping
 - **Heatmap**: Gaussian kernel density estimation, configurable radius/intensity, weighted points
 - **Temporal Animation**: time-range filtering, keyframe generation, trajectory interpolation, easing functions (linear, ease-in, ease-out, ease-in-out)

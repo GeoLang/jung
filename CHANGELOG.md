@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- 2026-11-27: `jung-core` reads gdaldem colour files and colours values with
+  them. `ColorFile::parse` takes the text `gdaldem color-relief` reads: a value,
+  a percentage or `nv`, then red, green, blue and an optional alpha, or one of
+  gdaldem's sixteen colour names and an optional alpha, split by spaces, tabs,
+  commas or colons, with `#` and `/` comment lines. `ValueRamp::new` resolves
+  the stops against a nodata value and, for percent stops, a `ValueRange`, and
+  `ValueRamp::color` follows `GDALColorReliefGetRGBA`: linear interpolation by
+  default, the end colours past the first and last stop, `ColorSelection::Exact`
+  and `ColorSelection::Nearest` for gdaldem's `-exact_color_entry` and
+  `-nearest_color_entry`. Nodata takes the `nv` colour, or transparent without
+  one.
+
 ### Changed
 
 - 2026-11-26: `jung-mvt` encoder rounds tile coordinates to the nearest unit
